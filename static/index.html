@@ -81,7 +81,7 @@ async function api(path, opts){
 }
 
 async function renderAccounts(){
-  const accs = await api("/api/accounts");
+  const accs = await api("api/accounts");
   document.getElementById("accounts").innerHTML = accs.length ? (`<table><tr><th>${dict[lang].source}</th><th>Provider</th><th>Owner</th><th></th></tr>` +
     accs.map(a=>`<tr><td>${a.name}</td><td>${a.provider}</td><td>${a.owner}</td><td><button onclick="delAcc('${a.id}')">${dict[lang].del}</button></td></tr>`).join("") + "</table>")
     : "<p>-</p>";
@@ -92,7 +92,7 @@ async function renderAccounts(){
 }
 
 async function renderJobs(accs){
-  const jobs = await api("/api/jobs");
+  const jobs = await api("api/jobs");
   const accName = id => (accs.find(a=>a.id===id)||{}).name || id;
   document.getElementById("jobs").innerHTML = jobs.length ? (`<table><tr><th>Name</th><th>${dict[lang].source}</th><th>${dict[lang].dest}</th><th>Dir</th><th>Status</th><th></th></tr>` +
     jobs.map(j=>{
@@ -104,7 +104,7 @@ async function renderJobs(accs){
 }
 
 async function renderLogs(){
-  const logs = await api("/api/logs");
+  const logs = await api("api/logs");
   document.getElementById("logs").innerHTML = logs.map(l=>`<pre>[${l.started_at}] ${l.success?"OK":"ERR"}\n${l.message}</pre>`).join("");
 }
 
@@ -114,15 +114,15 @@ async function renderAll(){
   await renderLogs();
 }
 
-async function delAcc(id){ await api("/api/accounts/"+id, {method:"DELETE"}); renderAll(); }
-async function delJob(id){ await api("/api/jobs/"+id, {method:"DELETE"}); renderAll(); }
-async function runJob(id){ const r = await api("/api/jobs/"+id+"/run", {method:"POST"}); renderAll(); }
-async function resolveConflict(id, repo){ await api(`/api/jobs/${id}/resolve/${encodeURIComponent(repo)}`, {method:"POST"}); renderAll(); }
+async function delAcc(id){ await api("api/accounts/"+id, {method:"DELETE"}); renderAll(); }
+async function delJob(id){ await api("api/jobs/"+id, {method:"DELETE"}); renderAll(); }
+async function runJob(id){ const r = await api("api/jobs/"+id+"/run", {method:"POST"}); renderAll(); }
+async function resolveConflict(id, repo){ await api(`api/jobs/${id}/resolve/${encodeURIComponent(repo)}`, {method:"POST"}); renderAll(); }
 
 document.getElementById("accForm").onsubmit = async (e)=>{
   e.preventDefault();
   const f = new FormData(e.target);
-  await api("/api/accounts", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
+  await api("api/accounts", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
     id:"", name:f.get("name"), provider:f.get("provider"), api_base:f.get("api_base"),
     git_base:f.get("git_base"), owner:f.get("owner"), token:f.get("token")
   })});
@@ -133,7 +133,7 @@ document.getElementById("jobForm").onsubmit = async (e)=>{
   e.preventDefault();
   const f = new FormData(e.target);
   const repos = (f.get("repos")||"").split(",").map(s=>s.trim()).filter(Boolean);
-  await api("/api/jobs", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
+  await api("api/jobs", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
     name:f.get("name"), source_account_id:f.get("source_account_id"), dest_account_id:f.get("dest_account_id"),
     direction:f.get("direction"), repos,
     schedule:{ every_hours: f.get("every_hours")?parseInt(f.get("every_hours")):null, days_of_week:[], hour:null, minute:null,
