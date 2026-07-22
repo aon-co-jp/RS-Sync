@@ -5,7 +5,7 @@
 GitHubリポジトリ: [aon-co-jp/RS-Sync](https://github.com/aon-co-jp/RS-Sync)。
 
 > ⚠️ **正直な開示(2026-07-22、初版)**: GitHubプロバイダのみ実機
-> (実HTTP・実git push)で検証済み。RGit/Gitea/Gitbucketはドキュメント
+> (実HTTP・実git push)で検証済み。RS-Git/Gitea/Gitbucketはドキュメント
 > ベースの実装のみで実機未検証(README参照)。双方向同期のコンフリクト
 > 検知はデフォルトブランチのHEAD sha比較のみ(ブランチ単位ではない)。
 > Webhookによるリアルタイム検知は未実装(ポーリングのみ)。
@@ -13,14 +13,14 @@ GitHubリポジトリ: [aon-co-jp/RS-Sync](https://github.com/aon-co-jp/RS-Sync)
 ## このプロジェクトの役割
 
 VPS上の既存`/root/sync-repos.sh`(cron、aon-co-jp組織の全リポジトリを
-バックアップ用GitHubアカウント+自前RGitサーバーへ一方向ミラーする
+バックアップ用GitHubアカウント+自前RS-Gitサーバーへ一方向ミラーする
 固定スクリプト)を土台に、汎用のGitリポジトリ同期WEBアプリとして
-作り直したもの。GitHub / RGit / Gitea / Gitbucket間で、アカウント登録・
+作り直したもの。GitHub / RS-Git / Gitea / Gitbucket間で、アカウント登録・
 同期ジョブ設定(一方向/双方向)・スケジュール設定・手動実行ができる。
 
 ## 技術スタック
 
-RGit/RPoem等と同じ方針: `poem`クレートを直接利用する単純なHTTP
+RS-Git/RPoem等と同じ方針: `poem`クレートを直接利用する単純なHTTP
 サービス。DB非依存、JSON永続化(`data/store.json`、gitignore対象)。
 実際のgit転送は`git`コマンドをシェルアウトする方式(`clone --mirror`/
 `push --mirror`)——既存の`sync-repos.sh`と同じアプローチ。
@@ -29,7 +29,7 @@ RGit/RPoem等と同じ方針: `poem`クレートを直接利用する単純なHT
 
 - `src/model.rs` — `Account`/`SyncJob`/`Schedule`/`RunLogEntry`、
   `AppState`(JSON永続化)。
-- `src/provider.rs` — `Provider`トレイトとGitHub/RGit/Gitea/Gitbucket/
+- `src/provider.rs` — `Provider`トレイトとGitHub/RS-Git/Gitea/Gitbucket/
   Local(テスト用)の各実装。git転送用のURL生成とREST API(一覧・作成)
   のみを担当。
 - `src/sync_engine.rs` — 実際の`git clone --mirror`/`push --mirror`
@@ -39,7 +39,7 @@ RGit/RPoem等と同じ方針: `poem`クレートを直接利用する単純なHT
   「リアルタイムポーリング間隔」のいずれかに該当するジョブを実行。
 - `static/index.html` — 日英2言語UI(`data-i18n`属性+JS辞書切替)。
   APIパスは相対パス(`api/...`)——`/rs-sync/`のようなプレフィックス
-  配下にマウントされても壊れないようにするため(RGitの`/rgit`デプロイ
+  配下にマウントされても壊れないようにするため(RGit(現RS-Git)の`/rgit`デプロイ
   で絶対パスfetchが壊れた教訓を踏襲)。
 
 ## テスト
@@ -114,6 +114,6 @@ cargo test --test sync_integration -- --test-threads=1
 
 ## 関連プロジェクト
 
-- [RGit](https://github.com/aon-co-jp/RGit) — 自前Git forge、RS-Syncの
-  プロバイダの1つ
+- [RS-Git](https://github.com/aon-co-jp/RS-Git) — 自前Git forge(旧RGit、
+  2026-07-22リネーム)、RS-Syncのプロバイダの1つ
 - [open-raid-z](https://github.com/aon-co-jp/open-raid-z) — 開発ルールの正本

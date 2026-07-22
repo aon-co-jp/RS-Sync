@@ -1,7 +1,7 @@
 # RS-Sync
 
 Git repository sync/backup tool across multiple git-hosting providers
-(GitHub / RGit / Gitea / Gitbucket), built with Rust + [poem](https://github.com/poem-web/poem).
+(GitHub / RS-Git / Gitea / Gitbucket), built with Rust + [poem](https://github.com/poem-web/poem).
 日本語の説明は下にあります。
 
 ## What it does (MVP)
@@ -27,7 +27,7 @@ Git repository sync/backup tool across multiple git-hosting providers
 | Provider  | List repos | Create repo | git clone/push | Verified live |
 |-----------|-----------|-------------|-----------------|----------------|
 | GitHub    | Yes | Yes | Yes | Yes (used in this repo's own sync) |
-| RGit      | Yes (via `/api/repos`) | Best-effort (`PUT /repos/:name`) | Yes | Partially (repo listing/creation not exercised against a live instance in tests) |
+| RS-Git      | Yes (via `/api/repos`) | Best-effort (`PUT /repos/:name`) | Yes | Partially (repo listing/creation not exercised against a live instance in tests) |
 | Gitea     | Implemented against documented API | Implemented | Yes | No — not tested against a live Gitea instance |
 | Gitbucket | Implemented against documented GitHub-compatible API | Implemented | Yes | No — not tested against a live Gitbucket instance |
 
@@ -77,7 +77,7 @@ and hostnames are never written into commits, README, or CLAUDE.md.
 
 ## 日本語
 
-RS-Syncは、複数のGitホスティングサービス(GitHub / RGit / Gitea /
+RS-Syncは、複数のGitホスティングサービス(GitHub / RS-Git / Gitea /
 Gitbucket)間でリポジトリを同期・バックアップするWebアプリです
 (Rust + poem)。
 
@@ -97,7 +97,7 @@ Gitbucket)間でリポジトリを同期・バックアップするWebアプリ�
 
 ### プロバイダ対応状況
 
-上記の英語表を参照。GitHubのみ実機検証済み。RGitはリポジトリ一覧・
+上記の英語表を参照。GitHubのみ実機検証済み。RS-Gitはリポジトリ一覧・
 作成APIは仕様どおり実装したが実機未検証(git転送自体はプロトコルが
 共通なため動作する見込み)。Gitea/Gitbucketは公開APIドキュメントに
 基づく実装のみで実機未検証。
