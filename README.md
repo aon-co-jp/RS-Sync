@@ -46,6 +46,10 @@ discovery/creation depends on the adapter.
   default branch's comparison decides.
 - Code-signed installers / OS package manager integration (msi/deb) — see
   `install.sh` / `install.ps1` for the current from-source installer scope.
+  As of 2026-07-23, `.github/workflows/release.yml` also builds and attaches
+  prebuilt Linux x86_64 / Windows x86_64 binaries to
+  [GitHub Releases](https://github.com/aon-co-jp/RS-Sync/releases) on every
+  `v*` tag push, as an alternative to the source-build flow.
 - Cross-compiling the Linux binary from this Windows dev machine (no
   cross-linker toolchain installed); Linux binaries are built directly on
   the target Linux host instead (verified on the VPS, see HANDOFF below).
@@ -107,6 +111,10 @@ Gitbucket)間でリポジトリを同期・バックアップするWebアプリ�
 - Webhookによるリアルタイム検知(ポーリングのみ実装)。
 - 完全なcron式(「何時間ごと」「曜日+時刻」「ポーリング間隔」の組合せのみ)。
 - ブランチ単位の双方向コンフリクト検知(デフォルトブランチのHEADのみ比較)。
-- コード署名済みインストーラー・deb/msiパッケージング。
+- コード署名済みインストーラー・deb/msiパッケージング。2026-07-23、
+  `.github/workflows/release.yml`を追加し、タグ(`v0.1.0`〜)push時に
+  Linux x86_64・Windows x86_64向けのプリビルド済みバイナリを
+  [GitHub Releases](https://github.com/aon-co-jp/RS-Sync/releases)へ
+  自動添付するようにした(ソースビルド方式の代替として提供)。
 - このWindows開発機からのLinuxバイナリのクロスコンパイル(クロス
   リンカー未導入のため未対応。Linux向けはVPS上で直接ビルドして検証済み)。

@@ -58,6 +58,26 @@ cargo test --test sync_integration -- --test-threads=1
 
 ## HANDOFF
 
+- **2026-07-23(続き) `.github/workflows/release.yml`を新規追加、
+  3点セット完備・v0.1.0タグでCI成功・GitHub Release実在確認まで完了**:
+  エコシステム全体インストーラー整備計画(正本: `open-raid-z/CLAUDE.md`
+  「エコシステム全体インストーラー整備計画」節)の一環。`install.sh`/
+  `install.ps1`は既存(ソースからのcargoビルド方式、変更無し)だった
+  ため、`release.yml`のみ新規追加した。Linux x86_64・Windows x86_64
+  向けにプリビルド済みバイナリをビルドし、`install.sh`/`install.ps1`と
+  一緒にtar.gz/zipへ同梱、GitHub Releasesへ`softprops/action-gh-release@v2`
+  で添付する構成(sibling path依存は無し、確認済み)。`v0.1.0`タグを
+  実際にpushし、`gh run list`で2ジョブ(Linux/Windows)とも
+  `completed success`、`gh release view v0.1.0`で
+  `rs-sync-linux-x86_64.tar.gz`/`rs-sync-windows-x86_64.zip`の両方が
+  実在することを確認した(型チェックのみでの完了報告ではない、
+  上記「未実装」節のクロスコンパイル制約とは別に、CI環境
+  〈ubuntu-latest/windows-latest ネイティブ〉では両OSとも問題なく
+  ビルドできることも確認できた)。READMEにもプリビルド済みバイナリの
+  入手先を追記(日英両方)。
+  - 次にすべきこと: Android版インストーラー(未着手、他リポジトリと
+    共通のバックログ)。
+
 - **2026-07-22 初版実装・実機検証・VPSデプロイ完了**:
   1. **実装**: プロバイダ抽象化(`Provider`トレイト)+GitHub実装フル、
      RGit/Gitea/Gitbucketは公開API仕様に基づく実装(未検証)。アカウント
