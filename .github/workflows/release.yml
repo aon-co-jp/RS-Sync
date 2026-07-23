@@ -1,0 +1,71 @@
+name: Release binaries
+
+# タグ(例: v0.1.0)をpushすると、Linux(x86_64-unknown-linux-gnu)・
+# Windows(x86_64)向けにビルドし、GitHub Releasesへ添付する。
+#
+# 正直な開示: このリポジトリの install.sh / install.ps1 は既定では
+# ソースからのビルド(git clone + cargo build --release)を行う設計だが、
+# ここで生成する tar.gz/zip はプリビルド済みバイナリを直接使いたい
+# ユーザー向けの代替配布物として提供する(install.sh/ps1 のソース
+# ビルド方式そのものは変更しない)。sibling path依存は無し
+# (Cargo.tomlにpath依存が無いことを確認済み)。
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Linux (x86_64-unknown-linux-gnu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build --release --bin rs-sync
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp target/release/rs-sync dist/rs-sync
+          cp install.sh dist/install.sh
+          tar -czf rs-sync-linux-x86_64.tar.gz -C dist rs-sync install.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rs-sync-linux-x86_64
+          path: rs-sync-linux-x86_64.tar.gz
+
+  build-windows:
+    name: Windows (x86_64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build --release --bin rs-sync
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item target/release/rs-sync.exe dist/
+          Copy-Item install.ps1 dist/
+          Compress-Archive -Path dist/* -DestinationPath rs-sync-windows-x86_64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rs-sync-windows-x86_64
+          path: rs-sync-windows-x86_64.zip
+
+  release:
+    name: GitHub Releaseへ添付
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            rs-sync-linux-x86_64/rs-sync-linux-x86_64.tar.gz
+            rs-sync-windows-x86_64/rs-sync-windows-x86_64.zip
