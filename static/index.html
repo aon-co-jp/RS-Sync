@@ -18,6 +18,9 @@ pre{white-space:pre-wrap;background:#111;padding:.5rem;font-size:.8rem}
 .ok{background:#1e5b2f}.err{background:#7a2020}.conflict{background:#8a5a10}
 .muted{color:#8a94a3;font-size:.9rem}
 .hidden{display:none}
+a{color:#5fb3ff}
+.demo-notice{color:#fff;font-size:.9rem}
+.bright{color:#fff}
 #langBtn{float:right}
 </style>
 </head>
@@ -25,7 +28,7 @@ pre{white-space:pre-wrap;background:#111;padding:.5rem;font-size:.8rem}
 <button id="langBtn">EN</button>
 <h1 data-i18n="title">RS-Sync — Gitリポジトリ同期ツール</h1>
 <p data-i18n="intro">GitHub / open-gitea / Gitea / Gitbucket 間でリポジトリを一方向バックアップ同期・双方向同期します。</p>
-<p class="muted">
+<p class="demo-notice">
   ここは管理者向け本番環境です。試しに触ってみたい方はデモ環境をどうぞ:
   <a href="/rs-sync/demo">https://easy-web.tokyo/rs-sync/demo</a><br>
   This is the admin/production environment. If you just want to try it out, use the demo instead:
@@ -34,13 +37,13 @@ pre{white-space:pre-wrap;background:#111;padding:.5rem;font-size:.8rem}
 
 <section id="auth-logged-out">
   <h2 data-i18n="loginH">ログイン</h2>
-  <p class="muted" data-i18n="loginNote">
+  <p class="bright" data-i18n="loginNote">
     セキュリティ上の理由により、登録済みの管理者メールアドレスでのみログインできます。
   </p>
-  <label for="login-email" data-i18n="loginEmailLabel">管理者メールアドレス</label>
+  <label class="bright" for="login-email" data-i18n="loginEmailLabel">管理者メールアドレス</label>
   <input id="login-email" type="email" placeholder="you@example.com">
   <div><button id="login-request-otp" data-i18n="sendCode">コードを送信</button></div>
-  <label for="login-code" data-i18n="loginCodeLabel">受信したコード(6桁)</label>
+  <label class="bright" for="login-code" data-i18n="loginCodeLabel">受信したコード(6桁)</label>
   <input id="login-code" type="text" inputmode="numeric" placeholder="123456">
   <div><button id="login-verify-otp" data-i18n="login">ログイン</button></div>
   <p id="login-result" class="muted" aria-live="polite"></p>
