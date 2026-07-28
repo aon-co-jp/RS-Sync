@@ -10,7 +10,7 @@ pub const DATA_DIR: &str = "data";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ProviderKind {
     GitHub,
-    RGit,
+    OpenGitea,
     Gitea,
     Gitbucket,
     /// Local filesystem bare-repo "provider": not a real hosting service,

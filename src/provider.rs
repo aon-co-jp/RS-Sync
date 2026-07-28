@@ -19,7 +19,7 @@ pub trait Provider {
 pub fn provider_for(kind: &ProviderKind) -> Box<dyn Provider> {
     match kind {
         ProviderKind::GitHub => Box::new(GitHubProvider),
-        ProviderKind::RGit => Box::new(RGitProvider),
+        ProviderKind::OpenGitea => Box::new(OpenGiteaProvider),
         ProviderKind::Gitea => Box::new(GiteaProvider),
         ProviderKind::Gitbucket => Box::new(GitbucketProvider),
         ProviderKind::Local => Box::new(LocalProvider),
@@ -187,27 +187,27 @@ impl Provider for GitHubProvider {
     }
 }
 
-// ---------------- RGit (self-hosted, partial) ----------------
-// RGit (aon-co-jp/RGit) exposes git smart-HTTP directly plus a small JSON API
+// ---------------- open-gitea (self-hosted, partial) ----------------
+// open-gitea (aon-co-jp/open-gitea) exposes git smart-HTTP directly plus a small JSON API
 // (`GET /api/repos`, `PUT /repos/:name` to create). No auth token scheme is
-// finalized yet on the RGit side beyond a fixed REMOTE_USER, so ensure_repo
+// finalized yet on the open-gitea side beyond a fixed REMOTE_USER, so ensure_repo
 // here is best-effort and list_repos uses the documented /api/repos endpoint.
-pub struct RGitProvider;
+pub struct OpenGiteaProvider;
 
 #[derive(Deserialize)]
-struct RGitRepoEntry {
+struct OpenGiteaRepoEntry {
     name: String,
 }
 
-impl Provider for RGitProvider {
+impl Provider for OpenGiteaProvider {
     fn list_repos(&self, account: &Account) -> Result<Vec<String>> {
         let client = http_client();
         let url = format!("{}/api/repos", account.api_base.trim_end_matches('/'));
         let resp = client.get(&url).send()?;
         if !resp.status().is_success() {
-            return Err(anyhow!("RGit list_repos failed: {}", resp.status()));
+            return Err(anyhow!("open-gitea list_repos failed: {}", resp.status()));
         }
-        let entries: Vec<RGitRepoEntry> = resp.json().unwrap_or_default();
+        let entries: Vec<OpenGiteaRepoEntry> = resp.json().unwrap_or_default();
         Ok(entries.into_iter().map(|e| e.name).collect())
     }
 
@@ -219,10 +219,10 @@ impl Provider for RGitProvider {
             repo
         );
         let resp = client.put(&url).send()?;
-        // RGit returns success or "already exists" style responses; treat any
+        // open-gitea returns success or "already exists" style responses; treat any
         // non-5xx as acceptable since this is best-effort per the docs above.
         if resp.status().is_server_error() {
-            return Err(anyhow!("RGit ensure_repo failed: {}", resp.status()));
+            return Err(anyhow!("open-gitea ensure_repo failed: {}", resp.status()));
         }
         Ok(())
     }

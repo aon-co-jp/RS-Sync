@@ -20,14 +20,14 @@ pre{white-space:pre-wrap;background:#111;padding:.5rem;font-size:.8rem}
 <body>
 <button id="langBtn">EN</button>
 <h1 data-i18n="title">RS-Sync — Gitリポジトリ同期ツール</h1>
-<p data-i18n="intro">GitHub / RGit / Gitea / Gitbucket 間でリポジトリを一方向バックアップ同期・双方向同期します。</p>
+<p data-i18n="intro">GitHub / open-gitea / Gitea / Gitbucket 間でリポジトリを一方向バックアップ同期・双方向同期します。</p>
 
 <h2 data-i18n="accountsH">アカウント</h2>
 <div id="accounts"></div>
 <details><summary data-i18n="addAccount">アカウントを追加</summary>
 <form id="accForm">
 <input name="name" placeholder="表示名" required>
-<select name="provider"><option>GitHub</option><option>RGit</option><option>Gitea</option><option>Gitbucket</option></select><br>
+<select name="provider"><option>GitHub</option><option>OpenGitea</option><option>Gitea</option><option>Gitbucket</option></select><br>
 <input name="api_base" placeholder="API base (例 https://api.github.com)" required style="width:100%">
 <input name="git_base" placeholder="git base (例 https://github.com)" required style="width:100%">
 <input name="owner" placeholder="owner/org" required>
@@ -56,11 +56,11 @@ pre{white-space:pre-wrap;background:#111;padding:.5rem;font-size:.8rem}
 
 <script>
 const dict = {
- ja: {title:"RS-Sync — Gitリポジトリ同期ツール", intro:"GitHub / RGit / Gitea / Gitbucket 間でリポジトリを一方向バックアップ同期・双方向同期します。",
+ ja: {title:"RS-Sync — Gitリポジトリ同期ツール", intro:"GitHub / open-gitea / Gitea / Gitbucket 間でリポジトリを一方向バックアップ同期・双方向同期します。",
    accountsH:"アカウント", addAccount:"アカウントを追加", save:"保存", jobsH:"同期ジョブ", addJob:"ジョブを追加",
    source:"ソース", dest:"宛先", oneway:"一方向", twoway:"双方向", everyHours:"何時間ごと", realtime:"リアルタイム監視(分間隔)",
    logsH:"実行ログ", run:"今すぐ同期", del:"削除", resolve:"解決済みにする"},
- en: {title:"RS-Sync — Git Repository Sync Tool", intro:"One-way backup or two-way sync of repositories across GitHub / RGit / Gitea / Gitbucket.",
+ en: {title:"RS-Sync — Git Repository Sync Tool", intro:"One-way backup or two-way sync of repositories across GitHub / open-gitea / Gitea / Gitbucket.",
    accountsH:"Accounts", addAccount:"Add account", save:"Save", jobsH:"Sync jobs", addJob:"Add job",
    source:"Source", dest:"Destination", oneway:"One-way", twoway:"Two-way", everyHours:"Every N hours", realtime:"Realtime poll (minutes)",
    logsH:"Run log", run:"Sync now", del:"Delete", resolve:"Mark resolved"}

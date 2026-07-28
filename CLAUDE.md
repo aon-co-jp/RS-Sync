@@ -39,7 +39,7 @@ RS-Git/RPoem等と同じ方針: `poem`クレートを直接利用する単純な
   「リアルタイムポーリング間隔」のいずれかに該当するジョブを実行。
 - `static/index.html` — 日英2言語UI(`data-i18n`属性+JS辞書切替)。
   APIパスは相対パス(`api/...`)——`/rs-sync/`のようなプレフィックス
-  配下にマウントされても壊れないようにするため(RGit(現RS-Git)の`/rgit`デプロイ
+  配下にマウントされても壊れないようにするため(open-gitea(現RS-Git)の`/rgit`デプロイ
   で絶対パスfetchが壊れた教訓を踏襲)。
 
 ## テスト
@@ -80,7 +80,7 @@ cargo test --test sync_integration -- --test-threads=1
 
 - **2026-07-22 初版実装・実機検証・VPSデプロイ完了**:
   1. **実装**: プロバイダ抽象化(`Provider`トレイト)+GitHub実装フル、
-     RGit/Gitea/Gitbucketは公開API仕様に基づく実装(未検証)。アカウント
+     open-gitea/Gitea/Gitbucketは公開API仕様に基づく実装(未検証)。アカウント
      登録・同期ジョブ設定(一方向/双方向)・スケジュール(何時間ごと/
      曜日+時刻/リアルタイムポーリング)・手動実行(「今すぐ同期」)・
      日英UIを実装。双方向同期はデフォルトブランチHEAD shaの前回同期時
@@ -124,7 +124,7 @@ cargo test --test sync_integration -- --test-threads=1
   10. **既存資産との関係**: VPS上の`/root/sync-repos.sh`(cron)は今回
       停止・削除せず、RS-Syncと並行稼働のままにしている。
 
-  - 次にすべきこと: (1) RGit/Gitea/Gitbucketプロバイダの実機検証
+  - 次にすべきこと: (1) open-gitea/Gitea/Gitbucketプロバイダの実機検証
     (特にRGitは自前サーバーがあるため優先度高)、(2) ブラウザでの
     実UI確認(Claude Browser paneでのクリック操作検証は未実施、
     curlでのHTML/JSON確認のみ)、(3) Webhookベースのリアルタイム検知、
@@ -132,8 +132,50 @@ cargo test --test sync_integration -- --test-threads=1
     インストーラー・deb/msiパッケージング、(6)
     `/root/sync-repos.sh`のcronをRS-Syncへ最終的に一本化するかの判断。
 
+## HANDOFF追記(2026-07-27) `RGit`プロバイダを`OpenGitea`へリネーム
+
+ユーザー指示「複数のGITHUBアカウントとopen-giteaとの同期をopen-easy-webに
+登録のopen-giteaで簡単同期管理」への対応。前提として`RS-Git`(旧`RGit`)
+リポジトリ自体が同日`open-gitea`へ改名されたため、RS-Sync側のプロバイダ
+実装・UIも追従させた。
+
+1. **`src/model.rs`**: `ProviderKind::RGit`→`ProviderKind::OpenGitea`。
+2. **`src/provider.rs`**: `RGitProvider`/`RGitRepoEntry`→
+   `OpenGiteaProvider`/`OpenGiteaRepoEntry`。実装自体(`GET /api/repos`・
+   `PUT /repos/:name`を叩く)は無変更——**open-gitea側のAPIエンドポイントは
+   改名の前後で変わっていないことをソースで確認済み**
+   (`open-gitea/src/main.rs`の`.at("/api/repos", get(list_repos))`・
+   `.at("/repos/:name", put(create_repo))`)。
+3. **`static/index.html`**: プロバイダ選択`<select>`の`<option>RGit`を
+   `<option>OpenGitea</option>`へ変更(このフォームは選択テキストを
+   そのまま`provider`フィールドとしてPOSTし、serdeが`ProviderKind`の
+   バリアント名文字列と照合するため、HTML側も必ず追従させる必要が
+   あった——ここを見落とすと「表示は直ったがフォーム送信時に
+   デシリアライズ失敗」という静かな不具合になる)。
+4. **検証**: `cargo build`/`cargo test`成功(既存の2件の実git統合テスト
+   green、回帰なし)。実際に本番稼働中の
+   `https://easy-web.tokyo/open-gitea/api/repos`へ`curl`し、200・
+   有効なJSON(`[]`)が返ることを確認——open-gitea側のAPIが実際に
+   到達可能でRS-Syncが期待する形式と一致することを実機で確認した。
+5. **正直な開示・未着手**: (1) RS-Sync UI上で実際にopen-giteaアカウントを
+   登録→同期ジョブを作成→実際に1リポジトリをミラー同期するE2Eは
+   今回未実施(API疎通確認止まり)。(2) open-easy-webの「外部ツール」
+   セクションにはRS-Sync・open-gitea双方へのリンクは既に登録済みだが、
+   「open-giteaへのGitHub複数アカウント同期をワンクリックで設定する」
+   専用の統合UI(RS-Syncを起動せず、open-easy-web上で直接アカウント
+   登録できるような)は存在しない——現状は「open-easy-webからRS-Syncを
+   起動し、RS-Sync自身のUIでアカウント登録・同期ジョブ作成を行う」
+   という2段階の運用フローのまま。
+  - 次にすべきこと: (1) RS-Sync UIでの実アカウント登録→同期ジョブ作成→
+    実ミラー同期のE2E確認、(2) 「open-easy-webから直接open-giteaの
+    同期設定ができる」というユーザー要望により深く応える場合、
+    open-easy-web側に专用の埋め込みUI/リダイレクト付きディープリンクを
+    追加するかの設計検討(現状の「別タブでRS-Syncを開く」体験で
+    十分かの確認を含む)。
+
 ## 関連プロジェクト
 
-- [RS-Git](https://github.com/aon-co-jp/RS-Git) — 自前Git forge(旧RGit、
-  2026-07-22リネーム)、RS-Syncのプロバイダの1つ
+- [open-gitea](https://github.com/aon-co-jp/open-gitea) — 自前Git forge
+  (旧名RGit→2026-07-22にRS-Gitへ改名→2026-07-27にopen-giteaへ再改名)、
+  RS-Syncのプロバイダの1つ
 - [open-raid-z](https://github.com/aon-co-jp/open-raid-z) — 開発ルールの正本
