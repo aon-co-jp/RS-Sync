@@ -55,6 +55,39 @@ pre{white-space:pre-wrap;background:#111;padding:.5rem;font-size:.8rem}
 
 <div id="app-section" class="hidden">
 
+<h2 data-i18n="quickH">クイック設定: マスター→コピー先(複数可)</h2>
+<p class="muted" data-i18n="quickHint">
+  「このGitHub組織/アカウントをマスターとして、変化があれば以下の組織/
+  アカウントへ全リポジトリをコピー同期する」という設定を、アカウント登録・
+  ジョブ作成を個別に行わずまとめて作成します(コピー先は複数指定可)。
+  一方向(マスター→コピー先のみ)・全リポジトリ・下で選んだ間隔での
+  自動実行として作成されます。
+</p>
+<form id="quickForm">
+  <label for="quick-master-url" data-i18n="quickMasterLabel">マスター(コピー元)のGitHub URLまたは組織/ユーザー名</label>
+  <input id="quick-master-url" placeholder="https://github.com/aon-co-jp または aon-co-jp" required>
+  <label for="quick-master-token" data-i18n="quickMasterTokenLabel">マスターの読み取り用トークン(公開リポジトリのみなら空欄可)</label>
+  <input id="quick-master-token" type="password" placeholder="ghp_...">
+
+  <div id="quick-dest-rows"></div>
+  <div class="buttons">
+    <button type="button" id="quick-add-dest" data-i18n="quickAddDest">+ コピー先を追加</button>
+  </div>
+
+  <label for="quick-schedule" data-i18n="quickScheduleLabel">マスターの変化をチェックする間隔</label>
+  <select id="quick-schedule">
+    <option value="15" data-i18n="preset15">15分ごと</option>
+    <option value="30" selected data-i18n="preset30">30分ごと</option>
+    <option value="60" data-i18n="preset60">1時間ごと</option>
+    <option value="" data-i18n="quickManualOnly">自動実行しない(手動のみ)</option>
+  </select>
+
+  <div class="buttons">
+    <button type="submit" data-i18n="quickCreate">この設定でまとめて作成</button>
+  </div>
+  <p id="quick-result" class="muted" aria-live="polite"></p>
+</form>
+
 <h2 data-i18n="accountsH">アカウント</h2>
 <p class="muted" data-i18n="accountsHint">
   GitHub・open-gitea・Gitea・Gitbucketいずれかのプロバイダで、同期の
@@ -165,6 +198,13 @@ const dict = {
    reposLabel:"対象リポジトリ名(カンマ区切り、空欄で全リポジトリ)",
    realtime:"何分ごとに自動実行するか(15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)",
    preset15:"15分ごと", preset30:"30分ごと", preset60:"1時間ごと", presetClear:"クリア",
+   quickH:"クイック設定: マスター→コピー先(複数可)",
+   quickHint:"「このGitHub組織/アカウントをマスターとして、変化があれば以下の組織/アカウントへ全リポジトリをコピー同期する」という設定を、アカウント登録・ジョブ作成を個別に行わずまとめて作成します(コピー先は複数指定可)。一方向(マスター→コピー先のみ)・全リポジトリ・下で選んだ間隔での自動実行として作成されます。",
+   quickMasterLabel:"マスター(コピー元)のGitHub URLまたは組織/ユーザー名", quickMasterTokenLabel:"マスターの読み取り用トークン(公開リポジトリのみなら空欄可)",
+   quickDestLabel:"コピー先のGitHub URLまたは組織/ユーザー名", quickDestTokenLabel:"コピー先への書き込み用トークン(repoスコープ、push権限が必要)",
+   quickRemoveDest:"このコピー先を削除", quickAddDest:"+ コピー先を追加",
+   quickScheduleLabel:"マスターの変化をチェックする間隔", quickManualOnly:"自動実行しない(手動のみ)",
+   quickCreate:"この設定でまとめて作成",
    everyHoursLabel:"(補足)代わりに「何時間ごと」で指定したい場合(上の分指定と併用可、両方空欄なら自動実行しない)",
    logsH:"実行ログ", run:"今すぐ同期", del:"削除", resolve:"解決済みにする"},
  en: {title:"RS-Sync — Git Repository Sync Tool", intro:"One-way backup or two-way sync of repositories across GitHub / open-gitea / Gitea / Gitbucket.",
@@ -186,6 +226,13 @@ const dict = {
    reposLabel:"Target repo names (comma-separated, empty = all repos)",
    realtime:"Run automatically every N minutes (15/30/60-minute presets, or type any custom number. Empty = no automatic runs)",
    preset15:"Every 15 min", preset30:"Every 30 min", preset60:"Every hour", presetClear:"Clear",
+   quickH:"Quick setup: master → copy-to (multiple allowed)",
+   quickHint:"Create the accounts and sync job(s) for \"treat this GitHub org/account as the master, and copy all repos to these org(s)/account(s) whenever it changes\" in one step (multiple copy-to destinations allowed). Created as one-way (master to copy-to only), all repos, auto-run at the interval selected below.",
+   quickMasterLabel:"Master (source) GitHub URL or org/user name", quickMasterTokenLabel:"Master read token (leave empty for public repos only)",
+   quickDestLabel:"Copy-to GitHub URL or org/user name", quickDestTokenLabel:"Copy-to write token (repo scope, needs push access)",
+   quickRemoveDest:"Remove this destination", quickAddDest:"+ Add copy-to destination",
+   quickScheduleLabel:"How often to check the master for changes", quickManualOnly:"Don't run automatically (manual only)",
+   quickCreate:"Create this setup",
    everyHoursLabel:"(Alternative) Specify \"every N hours\" instead (can be combined with the minutes field above; empty on both = no automatic runs)",
    logsH:"Run log", run:"Sync now", del:"Delete", resolve:"Mark resolved"}
 };
@@ -326,6 +373,96 @@ document.getElementById("jobForm").onsubmit = async (e)=>{
       realtime_poll_minutes: f.get("realtime_poll_minutes")?parseInt(f.get("realtime_poll_minutes")):null }
   })});
   e.target.reset(); renderAll();
+};
+
+// ---- クイック設定(マスター→複数コピー先を一括作成) ----
+
+/// "https://github.com/aon-co-jp" でも裸の "aon-co-jp" でも受け付け、
+/// owner名だけを取り出す。
+function parseGithubOwner(input){
+  const trimmed = (input||"").trim();
+  const withoutProtocol = trimmed.replace(/^https?:\/\//, "").replace(/^github\.com\//, "");
+  return withoutProtocol.replace(/\/+$/, "").split("/")[0];
+}
+
+function makeDestRow(){
+  const row = document.createElement("div");
+  row.className = "quick-dest-row";
+  row.style.borderTop = "1px solid #333";
+  row.style.marginTop = ".5rem";
+  row.style.paddingTop = ".5rem";
+  row.innerHTML = `
+    <label data-i18n="quickDestLabel">コピー先のGitHub URLまたは組織/ユーザー名</label>
+    <input class="quick-dest-url" placeholder="https://github.com/OpenRuno または OpenRuno" required>
+    <label data-i18n="quickDestTokenLabel">コピー先への書き込み用トークン(repoスコープ、push権限が必要)</label>
+    <input class="quick-dest-token" type="password" placeholder="ghp_...">
+    <div class="buttons"><button type="button" class="quick-remove-dest" data-i18n="quickRemoveDest">このコピー先を削除</button></div>
+  `;
+  row.querySelector(".quick-remove-dest").onclick = () => row.remove();
+  applyI18nTo(row);
+  return row;
+}
+
+function applyI18nTo(root){
+  root.querySelectorAll("[data-i18n]").forEach(el=>{
+    const k = el.getAttribute("data-i18n");
+    if(dict[lang][k]) el.textContent = dict[lang][k];
+  });
+}
+
+document.getElementById("quick-add-dest").onclick = () => {
+  document.getElementById("quick-dest-rows").appendChild(makeDestRow());
+};
+// 最初は1行だけ用意しておく(空欄のクイック設定フォームを最低限使える状態に)。
+document.getElementById("quick-dest-rows").appendChild(makeDestRow());
+
+document.getElementById("quickForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const resultEl = document.getElementById("quick-result");
+  resultEl.textContent = lang === "ja" ? "作成中..." : "Creating...";
+  try {
+    const masterOwner = parseGithubOwner(document.getElementById("quick-master-url").value);
+    const masterToken = document.getElementById("quick-master-token").value;
+    const destRows = Array.from(document.querySelectorAll(".quick-dest-row"))
+      .map(row => ({
+        owner: parseGithubOwner(row.querySelector(".quick-dest-url").value),
+        token: row.querySelector(".quick-dest-token").value,
+      }))
+      .filter(d => d.owner);
+    if (!masterOwner) throw new Error(lang === "ja" ? "マスターのURL/組織名を入力してください。" : "Please enter the master URL/org name.");
+    if (destRows.length === 0) throw new Error(lang === "ja" ? "コピー先を1つ以上入力してください。" : "Please enter at least one copy-to destination.");
+
+    const masterAccount = await api("api/accounts", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
+      id:"", name:`master-${masterOwner}`, provider:"GitHub", api_base:"https://api.github.com",
+      git_base:"https://github.com", owner:masterOwner, token:masterToken
+    })});
+
+    const everyMinutes = document.getElementById("quick-schedule").value;
+    let created = 0;
+    for (const dest of destRows) {
+      const destAccount = await api("api/accounts", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
+        id:"", name:`copy-${dest.owner}`, provider:"GitHub", api_base:"https://api.github.com",
+        git_base:"https://github.com", owner:dest.owner, token:dest.token
+      })});
+      await api("api/jobs", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
+        name:`${masterOwner} -> ${dest.owner}`, source_account_id:masterAccount.id, dest_account_id:destAccount.id,
+        direction:"OneWay", repos:[],
+        schedule:{ every_hours:null, days_of_week:[], hour:null, minute:null,
+          realtime_poll_minutes: everyMinutes ? parseInt(everyMinutes) : null }
+      })});
+      created++;
+    }
+    resultEl.textContent = lang === "ja"
+      ? `${created}件のコピー先へのジョブを作成しました。下の「同期ジョブ」一覧から確認・実行できます。`
+      : `Created jobs for ${created} destination(s). Check the "Sync jobs" list below.`;
+    document.getElementById("quick-master-url").value = "";
+    document.getElementById("quick-master-token").value = "";
+    document.getElementById("quick-dest-rows").innerHTML = "";
+    document.getElementById("quick-dest-rows").appendChild(makeDestRow());
+    renderAll();
+  } catch (e) {
+    resultEl.textContent = (lang === "ja" ? "エラー: " : "Error: ") + (e.message || String(e));
+  }
 };
 
 if (location.pathname.includes("/demo")) {
