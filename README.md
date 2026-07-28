@@ -29,7 +29,15 @@ Git repository sync/backup tool across multiple git-hosting providers
 | GitHub    | Yes | Yes | Yes | Yes (used in this repo's own sync) |
 | open-gitea | Yes (via `/api/repos`) | Yes, authenticated (`Bearer` token + Basic-auth git push) | Yes | Yes — verified live against `https://easy-web.tokyo/open-gitea/api/repos` (2026-07-28) |
 | Gitea     | Implemented against documented API | Implemented | Yes | No — not tested against a live Gitea instance |
-| Gitbucket | Implemented against documented GitHub-compatible API | Implemented | Yes | No — not tested against a live Gitbucket instance |
+| GitBucket (Scala OSS) | Implemented against documented GitHub-compatible API | Implemented | Yes | No — not tested against a live GitBucket instance |
+| GitLab (self-hosted or gitlab.com) | Implemented against documented REST v4 API | Implemented | Yes | No — not tested against a live GitLab instance |
+| Bitbucket (Atlassian Cloud) | Implemented against documented REST v2 API (first page only, no pagination) | Implemented | Yes | No — not tested against a live Bitbucket workspace |
+
+**Rented/VPS servers**: there is no separate "rented server" provider type —
+any self-hosted git-hosting service (Gitea, GitBucket, open-gitea) that you
+run on your own rented server or VPS works today by simply pointing the
+account's API base / git base URLs at that server; the same holds for
+GitLab/Bitbucket if self-hosted (GitLab CE, Bitbucket Data Center).
 
 All git transport (clone/push/fetch) is provider-agnostic — it is plain git
 over HTTP(S), so any provider that speaks git smart-HTTP will work for the
@@ -123,7 +131,14 @@ Gitbucket)間でリポジトリを同期・バックアップするWebアプリ�
 上記の英語表を参照。GitHub・open-giteaとも実機(実HTTP・実git push)で
 検証済み(2026-07-28、open-gitea側はリポジトリ作成・git pushの認証欠落
 バグを修正した上で本番`https://easy-web.tokyo/open-gitea/`への疎通を
-確認)。Gitea/Gitbucketは公開APIドキュメントに基づく実装のみで実機未検証。
+確認)。Gitea/GitBucket(Scala製OSS)/GitLab/Bitbucket(Atlassian Cloud)は
+いずれも公開APIドキュメントに基づく実装のみで実機未検証(2026-07-29、
+ユーザー要望「Bitbucket・Gitlabなどにも同期対応」を受けGitLab/Bitbucket
+アダプタを追加)。**「レンタルサーバー/VPSレンタルサーバー」専用の
+プロバイダ種別は存在しない**——自分のVPS/レンタルサーバー上で動かして
+いるGitea/GitBucket/open-gitea(あるいはセルフホスト版GitLab/Bitbucket)
+も、そのURLをAPI base/git baseに指定するだけで既存のプロバイダとして
+そのまま登録できる。
 
 ### 未実装(正直な開示)
 

@@ -75,7 +75,7 @@ pre{white-space:pre-wrap;background:#111;padding:.5rem;font-size:.8rem}
 
 <label for="acc-provider" data-i18n="accProviderLabel">プロバイダ</label>
 <select id="acc-provider" name="provider">
-  <option>GitHub</option><option>OpenGitea</option><option>Gitea</option><option>Gitbucket</option>
+  <option>GitHub</option><option>OpenGitea</option><option>Gitea</option><option>Gitbucket</option><option>GitLab</option><option>Bitbucket</option>
 </select>
 
 <label for="acc-api-base" data-i18n="accApiBaseLabel">API base URL(プロバイダのREST API入口)</label>
@@ -123,11 +123,17 @@ pre{white-space:pre-wrap;background:#111;padding:.5rem;font-size:.8rem}
 <label for="job-repos" data-i18n="reposLabel">対象リポジトリ名(カンマ区切り、空欄で全リポジトリ)</label>
 <input id="job-repos" name="repos" placeholder="repo1,repo2">
 
-<label for="job-every-hours" data-i18n="everyHours">何時間ごとに自動実行するか(空欄なら自動実行しない)</label>
-<input id="job-every-hours" name="every_hours" type="number" min="1">
+<label for="job-realtime" data-i18n="realtime">何分ごとに自動実行するか(15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)</label>
+<div class="buttons">
+  <button type="button" data-i18n="preset15" onclick="document.getElementById('job-realtime').value=15">15分ごと</button>
+  <button type="button" data-i18n="preset30" onclick="document.getElementById('job-realtime').value=30">30分ごと</button>
+  <button type="button" data-i18n="preset60" onclick="document.getElementById('job-realtime').value=60">1時間ごと</button>
+  <button type="button" data-i18n="presetClear" onclick="document.getElementById('job-realtime').value=''">クリア</button>
+</div>
+<input id="job-realtime" name="realtime_poll_minutes" type="number" min="1" placeholder="例: 45">
 
-<label for="job-realtime" data-i18n="realtime">リアルタイム監視の間隔(分、空欄なら使わない)</label>
-<input id="job-realtime" name="realtime_poll_minutes" type="number" min="1">
+<label for="job-every-hours" data-i18n="everyHoursLabel">(補足)代わりに「何時間ごと」で指定したい場合(上の分指定と併用可、両方空欄なら自動実行しない)</label>
+<input id="job-every-hours" name="every_hours" type="number" min="1">
 
 <div><button type="submit" data-i18n="save">保存</button></div>
 </form>
@@ -144,7 +150,7 @@ const dict = {
    loginH:"ログイン", loginNote:"セキュリティ上の理由により、登録済みの管理者メールアドレスでのみログインできます。",
    loginEmailLabel:"管理者メールアドレス", sendCode:"コードを送信", loginCodeLabel:"受信したコード(6桁)", login:"ログイン",
    loggedInAs:"ログイン中:", logout:"ログアウト",
-   accountsH:"アカウント", accountsHint:"GitHub・open-gitea・Gitea・Gitbucketいずれかのプロバイダで、同期のソース(コピー元)または宛先(コピー先)として使うアカウントを登録します。トークンは同期実行時にサーバー内部でのみ使用し、一覧には表示されません。",
+   accountsH:"アカウント", accountsHint:"GitHub・open-gitea・Gitea・GitBucket・GitLab・Bitbucketいずれかのプロバイダで、同期のソース(コピー元)または宛先(コピー先)として使うアカウントを登録します(レンタルサーバー・VPS上で動かしている自前のGitea/GitBucket/open-giteaも、そのURLを指定すれば同様に登録できます)。トークンは同期実行時にサーバー内部でのみ使用し、一覧には表示されません。",
    addAccount:"アカウントを追加",
    accNameLabel:"表示名(自分が分かればどんな名前でも可)", accProviderLabel:"プロバイダ",
    accApiBaseLabel:"API base URL(プロバイダのREST API入口)", accApiBaseHint:"GitHubなら通常そのまま https://api.github.com でOK。open-gitea等は自分でホストしているURL。",
@@ -157,13 +163,15 @@ const dict = {
    source:"ソース(コピー元)", dest:"宛先(コピー先)", directionLabel:"同期方向",
    oneway:"一方向(ソース→宛先のみ)", twoway:"双方向(両方の変更を反映)",
    reposLabel:"対象リポジトリ名(カンマ区切り、空欄で全リポジトリ)",
-   everyHours:"何時間ごとに自動実行するか(空欄なら自動実行しない)", realtime:"リアルタイム監視の間隔(分、空欄なら使わない)",
+   realtime:"何分ごとに自動実行するか(15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)",
+   preset15:"15分ごと", preset30:"30分ごと", preset60:"1時間ごと", presetClear:"クリア",
+   everyHoursLabel:"(補足)代わりに「何時間ごと」で指定したい場合(上の分指定と併用可、両方空欄なら自動実行しない)",
    logsH:"実行ログ", run:"今すぐ同期", del:"削除", resolve:"解決済みにする"},
  en: {title:"RS-Sync — Git Repository Sync Tool", intro:"One-way backup or two-way sync of repositories across GitHub / open-gitea / Gitea / Gitbucket.",
    loginH:"Login", loginNote:"For security reasons, only the registered admin email can log in.",
    loginEmailLabel:"Admin email address", sendCode:"Send code", loginCodeLabel:"Received code (6 digits)", login:"Log in",
    loggedInAs:"Logged in as:", logout:"Log out",
-   accountsH:"Accounts", accountsHint:"Register accounts (GitHub, open-gitea, Gitea, or Gitbucket) to use as a sync source or destination. The token is only ever used server-side during sync and is never shown back in the list.",
+   accountsH:"Accounts", accountsHint:"Register accounts (GitHub, open-gitea, Gitea, GitBucket, GitLab, or Bitbucket) to use as a sync source or destination — including self-hosted Gitea/GitBucket/open-gitea instances running on your own rented server or VPS, just point it at that URL. The token is only ever used server-side during sync and is never shown back in the list.",
    addAccount:"Add account",
    accNameLabel:"Display name (anything you'll recognize)", accProviderLabel:"Provider",
    accApiBaseLabel:"API base URL (the provider's REST API entry point)", accApiBaseHint:"For GitHub this is usually just https://api.github.com. For self-hosted providers, use your own URL.",
@@ -176,7 +184,9 @@ const dict = {
    source:"Source (copy from)", dest:"Destination (copy to)", directionLabel:"Sync direction",
    oneway:"One-way (source to destination only)", twoway:"Two-way (changes on both sides are applied)",
    reposLabel:"Target repo names (comma-separated, empty = all repos)",
-   everyHours:"Run automatically every N hours (empty = no automatic runs)", realtime:"Realtime poll interval, minutes (empty = disabled)",
+   realtime:"Run automatically every N minutes (15/30/60-minute presets, or type any custom number. Empty = no automatic runs)",
+   preset15:"Every 15 min", preset30:"Every 30 min", preset60:"Every hour", presetClear:"Clear",
+   everyHoursLabel:"(Alternative) Specify \"every N hours\" instead (can be combined with the minutes field above; empty on both = no automatic runs)",
    logsH:"Run log", run:"Sync now", del:"Delete", resolve:"Mark resolved"}
 };
 let lang = "ja";

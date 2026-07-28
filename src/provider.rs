@@ -22,6 +22,8 @@ pub fn provider_for(kind: &ProviderKind) -> Box<dyn Provider> {
         ProviderKind::OpenGitea => Box::new(OpenGiteaProvider),
         ProviderKind::Gitea => Box::new(GiteaProvider),
         ProviderKind::Gitbucket => Box::new(GitbucketProvider),
+        ProviderKind::GitLab => Box::new(GitLabProvider),
+        ProviderKind::Bitbucket => Box::new(BitbucketProvider),
         ProviderKind::Local => Box::new(LocalProvider),
     }
 }
@@ -381,4 +383,149 @@ impl Provider for GitbucketProvider {
             account.owner, account.token, base, account.owner, repo
         )
     }
+}
+
+// ---------------- GitLab (documented, not verified live) ----------------
+// GitLab REST API v4 (https://docs.gitlab.com/ee/api/projects.html) uses a
+// `PRIVATE-TOKEN` header and a personal-namespace project list under
+// `/api/v4/users/:username/projects` (works for both gitlab.com and
+// self-hosted instances). Not yet exercised against a live GitLab instance;
+// documented here honestly as unverified, mirroring the existing
+// Gitea/GitBucket adapters' disclosure pattern.
+pub struct GitLabProvider;
+
+#[derive(Deserialize)]
+struct GitLabProject {
+    path: String,
+}
+
+impl Provider for GitLabProvider {
+    fn list_repos(&self, account: &Account) -> Result<Vec<String>> {
+        let client = http_client();
+        let url = format!(
+            "{}/api/v4/users/{}/projects?per_page=100",
+            account.api_base.trim_end_matches('/'),
+            account.owner
+        );
+        let resp = client.get(&url).header("PRIVATE-TOKEN", &account.token).send()?;
+        if !resp.status().is_success() {
+            return Err(anyhow!("GitLab list_repos failed: {}", resp.status()));
+        }
+        let projects: Vec<GitLabProject> = resp.json()?;
+        Ok(projects.into_iter().map(|p| p.path).collect())
+    }
+
+    fn ensure_repo(&self, account: &Account, repo: &str) -> Result<()> {
+        let client = http_client();
+        let check_url = format!(
+            "{}/api/v4/projects/{}",
+            account.api_base.trim_end_matches('/'),
+            urlencode(&format!("{}/{}", account.owner, repo))
+        );
+        let resp = client.get(&check_url).header("PRIVATE-TOKEN", &account.token).send()?;
+        if resp.status().is_success() {
+            return Ok(());
+        }
+        let create_url = format!("{}/api/v4/projects", account.api_base.trim_end_matches('/'));
+        let body = serde_json::json!({ "name": repo, "visibility": "private" });
+        let resp = client.post(&create_url).header("PRIVATE-TOKEN", &account.token).json(&body).send()?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(anyhow!("GitLab ensure_repo failed: {}", resp.status()))
+        }
+    }
+
+    fn remote_url(&self, account: &Account, repo: &str) -> String {
+        // https://oauth2:<personal-access-token>@<host>/<owner>/<repo>.git
+        // ("oauth2" as the literal username is GitLab's documented
+        // convention for authenticating over HTTPS with a PAT).
+        let base = account
+            .git_base
+            .trim_end_matches('/')
+            .replacen("https://", "", 1)
+            .replacen("http://", "", 1);
+        format!("https://oauth2:{}@{}/{}/{}.git", account.token, base, account.owner, repo)
+    }
+}
+
+// ---------------- Bitbucket (Atlassian Cloud, documented, not verified live) ----------------
+// Bitbucket Cloud REST API v2 (https://developer.atlassian.com/cloud/bitbucket/rest/).
+// Distinct from the self-hosted "GitBucket" OSS project (see
+// [`GitbucketProvider`] above) despite the similar name. Uses a repository
+// access token as a Bearer token. Not yet exercised against a live
+// Bitbucket workspace; documented here honestly as unverified, mirroring
+// the existing Gitea/GitBucket/GitLab adapters' disclosure pattern. **Only
+// the first page of repos is listed** (no pagination via the `next`
+// field) — acceptable for a handful of repos per workspace, a known
+// limitation for larger workspaces.
+pub struct BitbucketProvider;
+
+#[derive(Deserialize)]
+struct BitbucketRepoList {
+    values: Vec<BitbucketRepo>,
+}
+
+#[derive(Deserialize)]
+struct BitbucketRepo {
+    slug: String,
+}
+
+impl Provider for BitbucketProvider {
+    fn list_repos(&self, account: &Account) -> Result<Vec<String>> {
+        let client = http_client();
+        let url = format!(
+            "{}/2.0/repositories/{}?pagelen=100",
+            account.api_base.trim_end_matches('/'),
+            account.owner
+        );
+        let resp = client.get(&url).header("Authorization", format!("Bearer {}", account.token)).send()?;
+        if !resp.status().is_success() {
+            return Err(anyhow!("Bitbucket list_repos failed: {}", resp.status()));
+        }
+        let list: BitbucketRepoList = resp.json()?;
+        Ok(list.values.into_iter().map(|r| r.slug).collect())
+    }
+
+    fn ensure_repo(&self, account: &Account, repo: &str) -> Result<()> {
+        let client = http_client();
+        let url = format!(
+            "{}/2.0/repositories/{}/{}",
+            account.api_base.trim_end_matches('/'),
+            account.owner,
+            repo
+        );
+        let body = serde_json::json!({ "scm": "git", "is_private": true });
+        let resp = client.post(&url).header("Authorization", format!("Bearer {}", account.token)).json(&body).send()?;
+        if resp.status().is_success() || resp.status() == reqwest::StatusCode::CONFLICT {
+            Ok(())
+        } else {
+            Err(anyhow!("Bitbucket ensure_repo failed: {}", resp.status()))
+        }
+    }
+
+    fn remote_url(&self, account: &Account, repo: &str) -> String {
+        // https://x-token-auth:<repository-access-token>@bitbucket.org/<owner>/<repo>.git
+        // ("x-token-auth" as the literal username is Bitbucket's documented
+        // convention for authenticating with a repository access token).
+        let base = account
+            .git_base
+            .trim_end_matches('/')
+            .replacen("https://", "", 1)
+            .replacen("http://", "", 1);
+        format!("https://x-token-auth:{}@{}/{}/{}.git", account.token, base, account.owner, repo)
+    }
+}
+
+/// Minimal path-segment percent-encoding (no new dependency), sufficient
+/// for GitLab's `namespace%2Fproject` URL-encoded project path convention.
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
 }

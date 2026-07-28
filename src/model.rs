@@ -12,7 +12,14 @@ pub enum ProviderKind {
     GitHub,
     OpenGitea,
     Gitea,
+    /// GitBucket (the Scala-based self-hosted OSS git server), distinct
+    /// from Atlassian's Bitbucket SaaS product (see [`Bitbucket`]).
     Gitbucket,
+    /// GitLab (self-hosted or gitlab.com), REST API v4.
+    GitLab,
+    /// Atlassian Bitbucket (Cloud REST API v2). Distinct from the
+    /// self-hosted "GitBucket" OSS project (see [`Gitbucket`]).
+    Bitbucket,
     /// Local filesystem bare-repo "provider": not a real hosting service,
     /// used for integration tests and for ad-hoc local mirroring
     /// (git_base is a directory path, repos live at git_base/<repo>.git).
