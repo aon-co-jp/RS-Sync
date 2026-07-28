@@ -61,6 +61,12 @@ pre{white-space:pre-wrap;background:#111;padding:.5rem;font-size:.8rem}
   ソース(コピー元)または宛先(コピー先)として使うアカウントを登録します。
   トークンは同期実行時にサーバー内部でのみ使用し、一覧には表示されません。
 </p>
+<p id="demo-token-warning" class="hidden" style="color:#ff8080;font-weight:bold;">
+  ⚠️ これはデモ環境で、ログイン無しで誰でも閲覧できます。実際のGitHub
+  トークン等は絶対に入力しないでください。/ This is the demo environment,
+  viewable by anyone without login. Never enter a real GitHub token or
+  other real credentials here.
+</p>
 <div id="accounts"></div>
 <details><summary data-i18n="addAccount">アカウントを追加</summary>
 <form id="accForm">
@@ -311,6 +317,10 @@ document.getElementById("jobForm").onsubmit = async (e)=>{
   })});
   e.target.reset(); renderAll();
 };
+
+if (location.pathname.includes("/demo")) {
+  document.getElementById("demo-token-warning").className = "";
+}
 
 applyI18n();
 syncAuthVisibility();
