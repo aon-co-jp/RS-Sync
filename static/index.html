@@ -79,11 +79,16 @@ a{color:#5fb3ff}
 
   <label for="quick-schedule" data-i18n="quickScheduleLabel">マスターの変化をチェックする間隔</label>
   <select id="quick-schedule">
+    <option value="1" data-i18n="presetRealtime">リアルタイム(1分ごとにチェック)</option>
     <option value="15" data-i18n="preset15">15分ごと</option>
     <option value="30" selected data-i18n="preset30">30分ごと</option>
     <option value="60" data-i18n="preset60">1時間ごと</option>
     <option value="" data-i18n="quickManualOnly">自動実行しない(手動のみ)</option>
   </select>
+  <p class="hint" data-i18n="realtimeHint">
+    「リアルタイム」はWebhookではなく1分間隔のポーリングです(サーバーへの
+    負荷とAPIレート制限にご注意ください)。
+  </p>
 
   <div class="buttons">
     <button type="submit" data-i18n="quickCreate">この設定でまとめて作成</button>
@@ -159,13 +164,18 @@ a{color:#5fb3ff}
 <label for="job-repos" data-i18n="reposLabel">対象リポジトリ名(カンマ区切り、空欄で全リポジトリ)</label>
 <input id="job-repos" name="repos" placeholder="repo1,repo2">
 
-<label for="job-realtime" data-i18n="realtime">何分ごとに自動実行するか(15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)</label>
+<label for="job-realtime" data-i18n="realtime">何分ごとに自動実行するか(リアルタイム・15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)</label>
 <div class="buttons">
+  <button type="button" data-i18n="presetRealtime" onclick="document.getElementById('job-realtime').value=1">リアルタイム(1分ごと)</button>
   <button type="button" data-i18n="preset15" onclick="document.getElementById('job-realtime').value=15">15分ごと</button>
   <button type="button" data-i18n="preset30" onclick="document.getElementById('job-realtime').value=30">30分ごと</button>
   <button type="button" data-i18n="preset60" onclick="document.getElementById('job-realtime').value=60">1時間ごと</button>
   <button type="button" data-i18n="presetClear" onclick="document.getElementById('job-realtime').value=''">クリア</button>
 </div>
+<p class="hint" data-i18n="realtimeHint">
+  「リアルタイム」はWebhookではなく1分間隔のポーリングです(サーバーへの
+  負荷とAPIレート制限にご注意ください)。
+</p>
 <input id="job-realtime" name="realtime_poll_minutes" type="number" min="1" placeholder="例: 45">
 
 <label for="job-every-hours" data-i18n="everyHoursLabel">(補足)代わりに「何時間ごと」で指定したい場合(上の分指定と併用可、両方空欄なら自動実行しない)</label>
@@ -200,7 +210,8 @@ const dict = {
    oneway:"一方向(ソース→宛先のみ)", twoway:"双方向(両方の変更を反映)",
    reposLabel:"対象リポジトリ名(カンマ区切り、空欄で全リポジトリ)",
    realtime:"何分ごとに自動実行するか(15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)",
-   preset15:"15分ごと", preset30:"30分ごと", preset60:"1時間ごと", presetClear:"クリア",
+   presetRealtime:"リアルタイム(1分ごと)", preset15:"15分ごと", preset30:"30分ごと", preset60:"1時間ごと", presetClear:"クリア",
+   realtimeHint:"「リアルタイム」はWebhookではなく1分間隔のポーリングです(サーバーへの負荷とAPIレート制限にご注意ください)。",
    quickH:"クイック設定: マスター→コピー先(複数可)",
    quickHint:"「このGitHub組織/アカウントをマスターとして、変化があれば以下の組織/アカウントへ全リポジトリをコピー同期する」という設定を、アカウント登録・ジョブ作成を個別に行わずまとめて作成します(コピー先は複数指定可)。一方向(マスター→コピー先のみ)・全リポジトリ・下で選んだ間隔での自動実行として作成されます。",
    quickMasterLabel:"マスター(コピー元)のGitHub URLまたは組織/ユーザー名", quickMasterTokenLabel:"マスターの読み取り用トークン(公開リポジトリのみなら空欄可)",
@@ -228,7 +239,8 @@ const dict = {
    oneway:"One-way (source to destination only)", twoway:"Two-way (changes on both sides are applied)",
    reposLabel:"Target repo names (comma-separated, empty = all repos)",
    realtime:"Run automatically every N minutes (15/30/60-minute presets, or type any custom number. Empty = no automatic runs)",
-   preset15:"Every 15 min", preset30:"Every 30 min", preset60:"Every hour", presetClear:"Clear",
+   presetRealtime:"Realtime (every 1 min)", preset15:"Every 15 min", preset30:"Every 30 min", preset60:"Every hour", presetClear:"Clear",
+   realtimeHint:"\"Realtime\" is 1-minute polling, not a webhook (be mindful of server load and API rate limits).",
    quickH:"Quick setup: master → copy-to (multiple allowed)",
    quickHint:"Create the accounts and sync job(s) for \"treat this GitHub org/account as the master, and copy all repos to these org(s)/account(s) whenever it changes\" in one step (multiple copy-to destinations allowed). Created as one-way (master to copy-to only), all repos, auto-run at the interval selected below.",
    quickMasterLabel:"Master (source) GitHub URL or org/user name", quickMasterTokenLabel:"Master read token (leave empty for public repos only)",
