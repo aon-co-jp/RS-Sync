@@ -187,11 +187,15 @@ impl Provider for GitHubProvider {
     }
 }
 
-// ---------------- open-gitea (self-hosted, partial) ----------------
+// ---------------- open-gitea (self-hosted) ----------------
 // open-gitea (aon-co-jp/open-gitea) exposes git smart-HTTP directly plus a small JSON API
-// (`GET /api/repos`, `PUT /repos/:name` to create). No auth token scheme is
-// finalized yet on the open-gitea side beyond a fixed REMOTE_USER, so ensure_repo
-// here is best-effort and list_repos uses the documented /api/repos endpoint.
+// (`GET /api/repos`, `PUT /repos/:name` to create). Repo creation and git push both
+// require auth: open-gitea accepts `Authorization: Bearer <session-token>` on the
+// JSON API, and `email:session-token` Basic auth embedded in the git remote URL
+// (see open-gitea's CLAUDE.md "git CLI向け認証方式"). `account.owner` holds the
+// login email for this provider (not an org/namespace like GitHub/Gitea), and
+// `account.token` holds the OTP session token obtained via
+// `POST /api/auth/verify-otp` on the open-gitea instance.
 pub struct OpenGiteaProvider;
 
 #[derive(Deserialize)]
@@ -203,7 +207,10 @@ impl Provider for OpenGiteaProvider {
     fn list_repos(&self, account: &Account) -> Result<Vec<String>> {
         let client = http_client();
         let url = format!("{}/api/repos", account.api_base.trim_end_matches('/'));
-        let resp = client.get(&url).send()?;
+        let resp = client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", account.token))
+            .send()?;
         if !resp.status().is_success() {
             return Err(anyhow!("open-gitea list_repos failed: {}", resp.status()));
         }
@@ -218,17 +225,38 @@ impl Provider for OpenGiteaProvider {
             account.api_base.trim_end_matches('/'),
             repo
         );
-        let resp = client.put(&url).send()?;
+        let resp = client
+            .put(&url)
+            .header("Authorization", format!("Bearer {}", account.token))
+            .send()?;
         // open-gitea returns success or "already exists" style responses; treat any
         // non-5xx as acceptable since this is best-effort per the docs above.
         if resp.status().is_server_error() {
             return Err(anyhow!("open-gitea ensure_repo failed: {}", resp.status()));
         }
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED
+            || resp.status() == reqwest::StatusCode::FORBIDDEN
+        {
+            return Err(anyhow!(
+                "open-gitea ensure_repo failed: {} (check account token/permissions)",
+                resp.status()
+            ));
+        }
         Ok(())
     }
 
     fn remote_url(&self, account: &Account, repo: &str) -> String {
-        format!("{}/{}.git", account.git_base.trim_end_matches('/'), repo)
+        // https://<email>:<session-token>@<host>/<repo>.git — open-gitea repos are
+        // not namespaced by owner/org, so no owner segment in the path.
+        let base = account
+            .git_base
+            .trim_end_matches('/')
+            .replacen("https://", "", 1)
+            .replacen("http://", "", 1);
+        format!(
+            "https://{}:{}@{}/{}.git",
+            account.owner, account.token, base, repo
+        )
     }
 }
 
