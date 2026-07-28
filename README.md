@@ -27,7 +27,7 @@ Git repository sync/backup tool across multiple git-hosting providers
 | Provider  | List repos | Create repo | git clone/push | Verified live |
 |-----------|-----------|-------------|-----------------|----------------|
 | GitHub    | Yes | Yes | Yes | Yes (used in this repo's own sync) |
-| RS-Git      | Yes (via `/api/repos`) | Best-effort (`PUT /repos/:name`) | Yes | Partially (repo listing/creation not exercised against a live instance in tests) |
+| open-gitea | Yes (via `/api/repos`) | Yes, authenticated (`Bearer` token + Basic-auth git push) | Yes | Yes — verified live against `https://easy-web.tokyo/open-gitea/api/repos` (2026-07-28) |
 | Gitea     | Implemented against documented API | Implemented | Yes | No — not tested against a live Gitea instance |
 | Gitbucket | Implemented against documented GitHub-compatible API | Implemented | Yes | No — not tested against a live Gitbucket instance |
 
@@ -53,6 +53,16 @@ discovery/creation depends on the adapter.
 - Cross-compiling the Linux binary from this Windows dev machine (no
   cross-linker toolchain installed); Linux binaries are built directly on
   the target Linux host instead (verified on the VPS, see HANDOFF below).
+
+## Deployment
+
+- **Production/admin**: <https://easy-web.tokyo/rs-sync/>
+- **Demo**: <https://easy-web.tokyo/rs-sync/demo> (honest disclosure: currently
+  just an alias to the same backend as production — no isolated demo dataset
+  yet)
+- The old `runo.tokyo/rs-sync` demo instance was fully decommissioned on
+  2026-07-28 (service, tenant routing, and data all removed) in favor of the
+  above.
 
 ## Running locally
 
@@ -81,9 +91,18 @@ and hostnames are never written into commits, README, or CLAUDE.md.
 
 ## 日本語
 
-RS-Syncは、複数のGitホスティングサービス(GitHub / RS-Git / Gitea /
+RS-Syncは、複数のGitホスティングサービス(GitHub / open-gitea / Gitea /
 Gitbucket)間でリポジトリを同期・バックアップするWebアプリです
 (Rust + poem)。
+
+### 運用先
+
+- **本番/管理者用**: <https://easy-web.tokyo/rs-sync/>
+- **デモ用**: <https://easy-web.tokyo/rs-sync/demo>(正直な開示: 現状は
+  本番と同一バックエンドを指すエイリアスで、独立したデモ専用データは
+  まだ無い)
+- 旧`runo.tokyo/rs-sync`のデモインスタンスは2026-07-28に完全に廃止
+  (サービス・テナントルーティング・データを全て削除)し、上記へ一本化した。
 
 ### できること(MVP)
 
@@ -101,10 +120,10 @@ Gitbucket)間でリポジトリを同期・バックアップするWebアプリ�
 
 ### プロバイダ対応状況
 
-上記の英語表を参照。GitHubのみ実機検証済み。RS-Gitはリポジトリ一覧・
-作成APIは仕様どおり実装したが実機未検証(git転送自体はプロトコルが
-共通なため動作する見込み)。Gitea/Gitbucketは公開APIドキュメントに
-基づく実装のみで実機未検証。
+上記の英語表を参照。GitHub・open-giteaとも実機(実HTTP・実git push)で
+検証済み(2026-07-28、open-gitea側はリポジトリ作成・git pushの認証欠落
+バグを修正した上で本番`https://easy-web.tokyo/open-gitea/`への疎通を
+確認)。Gitea/Gitbucketは公開APIドキュメントに基づく実装のみで実機未検証。
 
 ### 未実装(正直な開示)
 

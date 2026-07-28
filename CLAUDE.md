@@ -132,6 +132,64 @@ cargo test --test sync_integration -- --test-threads=1
     インストーラー・deb/msiパッケージング、(6)
     `/root/sync-repos.sh`のcronをRS-Syncへ最終的に一本化するかの判断。
 
+## 関連作業・横串メモ(2026-07-28、どのリポジトリから再開しても迷わないための相互参照)
+
+2026-07-28のセッションでは、RS-Sync・open-redmine・runo.tokyo・
+open-easy-webの4リポジトリにまたがる作業を行った。**このセッションの
+続きをどこから再開しても良いように**、各リポジトリのCLAUDE.mdに同じ日付の
+HANDOFFエントリを置いてある: [open-redmine](https://github.com/aon-co-jp/open-redmine/blob/main/CLAUDE.md)
+(runo.tokyoテナント削除+デモリンク追加)・
+[runo.tokyo](https://github.com/aon-co-jp/runo.tokyo/blob/main/CLAUDE.md)
+(rs-syncデモ廃止に伴う参照削除)・
+[open-easy-web](https://github.com/aon-co-jp/open-easy-web/blob/main/CLAUDE.md)
+(外部ツールリンクのURL更新、VPS側WASM未反映が既知の残課題)。
+未着手事項の全体像は下の各HANDOFFエントリの「次にすべきこと」を参照。
+
+## HANDOFF追記(2026-07-28) OpenGiteaプロバイダの認証欠落バグ修正 + 本番をeasy-web.tokyoへ移設
+
+ユーザー指示「複数のGITHUBアカウントとopen-giteaとの同期をopen-easy-webに
+登録のopen-giteaで簡単同期管理したい」のRS-Sync実E2E検証への対応
+(前回のプロバイダ改名・API疎通確認の続き)。
+
+1. **発見・修正した実バグ**: `src/provider.rs`の`OpenGiteaProvider`が
+   `list_repos`/`ensure_repo`/`remote_url`のいずれでも一切認証情報を
+   送っていなかった——open-gitea側は`PUT /repos/:name`(リポジトリ作成)に
+   `Authorization: Bearer <session-token>`を必須化済みのため、このままでは
+   実際のミラー同期(リポジトリ作成・git push)が確実に401で失敗する状態
+   だった。`account.owner`をopen-giteaのログインメール、`account.token`を
+   OTPセッショントークンとして扱い、JSON APIへは`Bearer`ヘッダ、git
+   push URLへは`https://<email>:<token>@<host>/<repo>.git`形式のBasic認証
+   埋め込みを追加した(open-gitea側CLAUDE.mdが文書化する認証方式と一致)。
+2. **runo.tokyo/rs-syncデモインスタンスを完全廃止**(ユーザー指示
+   「デモ用はやめて削除して」): systemdサービス停止・unit削除・
+   `domains.toml`からテナントエントリ削除・`/root/runo.tokyo/rs-sync`
+   ディレクトリ(ソース・`data/store.json`含む)を削除。`https://runo.tokyo/
+   rs-sync/`は404を返すことを確認済み。
+3. **本番を`https://easy-web.tokyo/rs-sync/`へ新規デプロイ**:
+   `/root/rs-sync`にクリーンclone(上記1の修正込み)→`cargo build
+   --release`→`rs-sync.service`新設(`RestartSec=2`・
+   `StartLimitIntervalSec=0`)→`easy-web.tokyo`の`/rs-sync`
+   (本番/管理者用)・`/rs-sync/demo`(デモ、現状は同一バックエンドへの
+   エイリアス)の2テナントを`POST /admin/tenants`で登録。両方200を確認。
+4. **本番ページ自体にデモへの案内リンクを追加**(ユーザー指示
+   「その中に以下のデモ用にリンクも貼って」): `static/index.html`の
+   イントロ直下に、日本語・英語併記で`/rs-sync/demo`へのリンクを追加。
+5. **正直な開示・未着手**: (1) 実GitHubアカウント登録→open-giteaへの
+   実ミラー同期という完全なE2Eは、実GitHub PAT(トークン)の入力が必要な
+   ためこのセッションでは未実施——ユーザー自身がRS-SyncのフォームにPATを
+   入力する必要がある(エージェントが認証情報をフォームへ入力することは
+   ポリシー上行わない)。次回、ユーザーが本番`https://easy-web.tokyo/
+   rs-sync/`でGitHubアカウント+open-giteaアカウント(ログインメール+
+   OTPセッショントークン)を登録し、同期ジョブを作成・実行するところ
+   まで確認すること。(2) `/rs-sync/demo`は本番と同一バックエンド・
+   同一データを指すエイリアスに過ぎず、独立したデモ専用データセットでは
+   ない——将来的に本当の意味でのデモ分離が必要なら別プロセス/別
+   `RS_SYNC_DATA`が必要。
+  - 次にすべきこと: (1) 実GitHub PAT+open-giteaセッショントークンでの
+    フルE2E(ユーザー操作が必要)、(2) `/rs-sync/demo`の真のデータ分離
+    (現状はエイリアスのみ)、(3) 上記のsync実行後、実際にopen-gitea側に
+    リポジトリが作成されミラーされることの実機確認。
+
 ## HANDOFF追記(2026-07-27) `RGit`プロバイダを`OpenGitea`へリネーム
 
 ユーザー指示「複数のGITHUBアカウントとopen-giteaとの同期をopen-easy-webに
