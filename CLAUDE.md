@@ -179,3 +179,28 @@ cargo test --test sync_integration -- --test-threads=1
   (旧名RGit→2026-07-22にRS-Gitへ改名→2026-07-27にopen-giteaへ再改名)、
   RS-Syncのプロバイダの1つ
 - [open-raid-z](https://github.com/aon-co-jp/open-raid-z) — 開発ルールの正本
+
+## HANDOFF追記(2026-07-27続き) VPS上でRS-Syncが削除済みディレクトリから実行され続けていた問題を発見・修正
+
+`OpenGitea`リネーム反映のため`systemctl cat rs-sync.service`で
+`WorkingDirectory=/root/runo.tokyo/rs-sync`を確認したところ、
+実際にはそのディレクトリが**存在しなかった**(`ls`で見えない)。
+`/proc/<pid>/exe`・`/proc/<pid>/cwd`を確認したところ、稼働中の
+プロセスは`(deleted)`マーク付きのファイルハンドルを保持したまま
+動き続けているゾンビ状態だったと判明(何らかの理由で作業ディレクトリ
+自体が削除されたが、既に起動していたプロセスはメモリ上のバイナリ
+イメージで動き続けていたため、外形上は`systemctl status`が
+`active (running)`のまま正常に見えていた)。
+
+**修正**: `git clone https://github.com/aon-co-jp/RS-Sync.git`で
+`/root/runo.tokyo/rs-sync`を再作成し、`cargo build --release`で
+再ビルド、`systemctl restart rs-sync.service`で新しいバイナリへ
+切り替え。`curl https://runo.tokyo/rs-sync/`で`OpenGitea`が
+選択肢に含まれることを実際に確認済み。
+
+**正直な開示**: このディレクトリがいつ・なぜ削除されたかは不明
+(このセッションで削除した記憶はなく、別セッションの作業や
+手動オペレーションが原因の可能性がある)。今後、同様の「ゾンビ
+プロセス」状態(`ls`にディレクトリが見えないのに`systemctl status`は
+正常)を早期発見するため、デプロイ前に`/proc/<pid>/exe`の
+`(deleted)`マークを確認する習慣を推奨する。
