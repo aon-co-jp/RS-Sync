@@ -232,6 +232,8 @@ const dict = {
    accGitBaseLabel:"git base URL(clone/pushで使うURL)", accGitBaseHint:"GitHubなら通常そのまま https://github.com でOK。",
    accOwnerLabel:"owner / org(GitHubのユーザー名または組織名)",
    accTokenLabel:"トークン(このアカウントへのアクセス権を持つAPIトークン)", accTokenHint:"GitHubならfine-grained personal access token(repoスコープ)。ここに入力した値は一覧に再表示されません。",
+   tokenCol:"トークン", tokenSet:"設定済み", tokenNotSet:"未設定(匿名アクセス、レート制限に注意)",
+   updateToken:"トークンを更新", tokenUpdated:"更新しました",
    save:"保存",
    jobsH:"同期ジョブ", jobsHint:"上で登録したアカウント同士の間で、どのリポジトリを・どちらの向きに・どのタイミングで同期するかを設定します。",
    addJob:"ジョブを追加", jobNameLabel:"ジョブ名(自分が分かればどんな名前でも可)",
@@ -262,6 +264,8 @@ const dict = {
    accGitBaseLabel:"git base URL (used for clone/push)", accGitBaseHint:"For GitHub this is usually just https://github.com.",
    accOwnerLabel:"Owner / org (your GitHub username or organization)",
    accTokenLabel:"Token (an API token with access to this account)", accTokenHint:"For GitHub, a fine-grained personal access token (repo scope). What you type here is never shown back in the list.",
+   tokenCol:"Token", tokenSet:"Set", tokenNotSet:"Not set (anonymous access, mind the rate limit)",
+   updateToken:"Update token", tokenUpdated:"Updated",
    save:"Save",
    jobsH:"Sync jobs", jobsHint:"Between the accounts registered above, configure which repos, in which direction, and on what schedule to sync.",
    addJob:"Add job", jobNameLabel:"Job name (anything you'll recognize)",
@@ -358,13 +362,45 @@ document.getElementById("logout-btn").onclick = async ()=>{
 
 async function renderAccounts(){
   const accs = await api("api/accounts");
-  document.getElementById("accounts").innerHTML = accs.length ? (`<table><tr><th>${dict[lang].source}</th><th>Provider</th><th>Owner</th><th></th></tr>` +
-    accs.map(a=>`<tr><td>${a.name}</td><td>${a.provider}</td><td>${a.owner}</td><td><button onclick="delAcc('${a.id}')">${dict[lang].del}</button></td></tr>`).join("") + "</table>")
+  document.getElementById("accounts").innerHTML = accs.length ? (`<table><tr><th>${dict[lang].source}</th><th>Provider</th><th>Owner</th><th>${dict[lang].tokenCol}</th><th></th></tr>` +
+    accs.map(a=>{
+      const tokenBadge = a.token_set
+        ? `<span class="pill ok">${dict[lang].tokenSet}</span>`
+        : `<span class="pill err">${dict[lang].tokenNotSet}</span>`;
+      return `<tr>
+        <td>${a.name}</td><td>${a.provider}</td><td>${a.owner}</td>
+        <td>${tokenBadge}</td>
+        <td>
+          <button onclick="delAcc('${a.id}')">${dict[lang].del}</button>
+          <details style="display:inline-block">
+            <summary style="display:inline">${dict[lang].updateToken}</summary>
+            <div>
+              <input type="password" id="tok-${a.id}" placeholder="ghp_...">
+              <button onclick="updateAccountToken('${a.id}')">${dict[lang].save}</button>
+              <span id="tok-result-${a.id}" class="hint"></span>
+            </div>
+          </details>
+        </td>
+      </tr>`;
+    }).join("") + "</table>")
     : "<p>-</p>";
   const opts = accs.map(a=>`<option value="${a.id}">${a.name}</option>`).join("");
   document.getElementById("srcSel").innerHTML = opts;
   document.getElementById("dstSel").innerHTML = opts;
   return accs;
+}
+
+async function updateAccountToken(id){
+  const input = document.getElementById("tok-"+id);
+  const resultEl = document.getElementById("tok-result-"+id);
+  try {
+    await api("api/accounts/"+id, {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({token: input.value})});
+    input.value = "";
+    resultEl.textContent = dict[lang].tokenUpdated;
+    renderAll();
+  } catch(e) {
+    resultEl.textContent = String(e);
+  }
 }
 
 async function renderJobs(accs){

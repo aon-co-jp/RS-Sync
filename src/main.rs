@@ -85,6 +85,36 @@ fn delete_account(state: Data<&Arc<AppState>>, PPath(id): PPath<String>) -> Json
     Json(serde_json::json!({"ok": true}))
 }
 
+/// アカウントのトークンだけを後から更新するためのリクエスト。
+/// 2026-07-29追記(ユーザー指示「この中でトークンを入れられるように
+/// 改善して」): それまでアカウントの更新手段が無く、トークンを後から
+/// 設定するには削除して作り直す必要があった(実際にユーザーがトークン
+/// 未設定のままアカウントを作り、GitHubの匿名アクセス制限〈60
+/// リクエスト/時間〉に達してしまう実障害が発生した)。他のフィールドは
+/// 変更頻度が低いためスコープ外とし、最も必要とされるトークン更新のみを
+/// 対象にした最小実装。
+#[derive(serde::Deserialize)]
+struct UpdateAccountTokenReq {
+    token: String,
+}
+
+#[handler]
+fn update_account_token(
+    state: Data<&Arc<AppState>>,
+    PPath(id): PPath<String>,
+    Json(body): Json<UpdateAccountTokenReq>,
+) -> Response {
+    let mut store = state.store.lock().unwrap();
+    let Some(acc) = store.accounts.iter_mut().find(|a| a.id == id) else {
+        return error_response(StatusCode::NOT_FOUND, "account not found");
+    };
+    acc.token = body.token;
+    let view = AccountView::from(&*acc);
+    drop(store);
+    state.save();
+    json_ok(&serde_json::to_value(view).unwrap())
+}
+
 #[derive(serde::Deserialize)]
 struct NewJobReq {
     name: String,
@@ -284,7 +314,7 @@ impl<E: Endpoint> Endpoint for RequireAuthEndpoint<E> {
 fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::Endpoint {
     let protected = Route::new()
         .at("/accounts", get(list_accounts).post(create_account))
-        .at("/accounts/:id", poem::delete(delete_account))
+        .at("/accounts/:id", poem::delete(delete_account).put(update_account_token))
         .at("/jobs", get(list_jobs).post(create_job))
         .at("/jobs/:id", poem::delete(delete_job))
         .at("/jobs/:id/run", post(run_job_now))
@@ -399,6 +429,56 @@ mod tests {
         let body_text = resp.0.into_body().into_string().await.unwrap();
         assert!(!body_text.contains("super-secret-pat"), "raw token leaked in list response: {body_text}");
         assert!(body_text.contains("token_set"));
+    }
+
+    /// 2026-07-29追記: `PUT /api/accounts/:id`でトークンだけを後から
+    /// 更新できることの回帰確認(削除して作り直す必要をなくす)。
+    #[tokio::test]
+    async fn account_token_can_be_updated_without_recreating_the_account() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, auth_state) = make_state(&tmp, true);
+        let token = auth_state.auth.create_session("admin@example.com");
+        let app = build_app(state, auth_state);
+        let client = TestClient::new(app);
+
+        let create_resp = client
+            .post("/api/accounts")
+            .header("Authorization", format!("Bearer {token}"))
+            .body_json(&serde_json::json!({
+                "id": "", "name": "master", "provider": "GitHub", "api_base": "https://api.github.com",
+                "git_base": "https://github.com", "owner": "aon-co-jp", "token": ""
+            }))
+            .send()
+            .await;
+        create_resp.assert_status_is_ok();
+        let created: serde_json::Value = create_resp.0.into_body().into_json().await.unwrap();
+        let id = created["id"].as_str().unwrap().to_string();
+
+        // 更新前はtoken_set=false(空トークンのまま)。
+        assert_eq!(created["token_set"], serde_json::json!(false));
+
+        let update_resp = client
+            .put(format!("/api/accounts/{id}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .body_json(&serde_json::json!({"token": "ghp_newtoken"}))
+            .send()
+            .await;
+        update_resp.assert_status_is_ok();
+        let updated_body = update_resp.0.into_body().into_string().await.unwrap();
+        assert!(!updated_body.contains("ghp_newtoken"), "raw token leaked in update response: {updated_body}");
+
+        let list_resp = client.get("/api/accounts").header("Authorization", format!("Bearer {token}")).send().await;
+        let list: serde_json::Value = list_resp.0.into_body().into_json().await.unwrap();
+        assert_eq!(list[0]["token_set"], serde_json::json!(true));
+
+        // 存在しないIDへの更新は404。
+        let missing_resp = client
+            .put("/api/accounts/does-not-exist")
+            .header("Authorization", format!("Bearer {token}"))
+            .body_json(&serde_json::json!({"token": "x"}))
+            .send()
+            .await;
+        missing_resp.assert_status(StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
