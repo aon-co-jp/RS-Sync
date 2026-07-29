@@ -249,7 +249,8 @@ const dict = {
    quickScheduleLabel:"マスターの変化をチェックする間隔", quickManualOnly:"自動実行しない(手動のみ)",
    quickCreate:"この設定でまとめて作成",
    everyHoursLabel:"(補足)代わりに「何時間ごと」で指定したい場合(上の分指定と併用可、両方空欄なら自動実行しない)",
-   logsH:"実行ログ", run:"今すぐ同期", del:"削除", resolve:"解決済みにする"},
+   logsH:"実行ログ", run:"今すぐ同期", del:"削除", resolve:"解決済みにする",
+   sameAccountWarning:"⚠ ソースと宛先が同じアカウントです(意図した設定か確認してください)"},
  en: {title:"RS-Sync — Git Repository Sync Tool", intro:"One-way backup or two-way sync of repositories across GitHub / open-gitea / Gitea / Gitbucket.",
    loginH:"Login", loginNote:"For security reasons, only the registered admin email can log in.",
    loginEmailLabel:"Admin email address", sendCode:"Send code", loginCodeLabel:"Received code (6 digits)", login:"Log in",
@@ -278,7 +279,8 @@ const dict = {
    quickScheduleLabel:"How often to check the master for changes", quickManualOnly:"Don't run automatically (manual only)",
    quickCreate:"Create this setup",
    everyHoursLabel:"(Alternative) Specify \"every N hours\" instead (can be combined with the minutes field above; empty on both = no automatic runs)",
-   logsH:"Run log", run:"Sync now", del:"Delete", resolve:"Mark resolved"}
+   logsH:"Run log", run:"Sync now", del:"Delete", resolve:"Mark resolved",
+   sameAccountWarning:"⚠ Source and destination are the same account (check this is intentional)"}
 };
 let lang = "ja";
 function applyI18n(){
@@ -367,14 +369,28 @@ async function renderAccounts(){
 
 async function renderJobs(accs){
   const jobs = await api("api/jobs");
+  const logs = await api("api/logs");
   const accName = id => (accs.find(a=>a.id===id)||{}).name || id;
+  // 各ジョブについて、直近の実行ログ(エラーメッセージ)を紐付ける
+  // (`logs`はAPI仕様上すでに新しい順)。ステータスの丸印だけでは
+  // 何が起きたか分からない、というユーザー指摘への対応。
+  const lastLogFor = jobId => logs.find(l => l.job_id === jobId);
   document.getElementById("jobs").innerHTML = jobs.length ? (`<table><tr><th>Name</th><th>${dict[lang].source}</th><th>${dict[lang].dest}</th><th>Dir</th><th>Status</th><th></th></tr>` +
     jobs.map(j=>{
       const conflictBadges = (j.conflicted_repos||[]).map(r=>`<span class="pill conflict">${r} <a href="#" onclick="resolveConflict('${j.id}','${r}');return false;">[${dict[lang].resolve}]</a></span>`).join(" ");
       const statusPill = j.last_run_status ? `<span class="pill ${j.last_run_status==='ok'?'ok':'err'}">${j.last_run_status}</span>` : "-";
-      return `<tr><td>${j.name}</td><td>${accName(j.source_account_id)}</td><td>${accName(j.dest_account_id)}</td><td>${j.direction}</td><td>${statusPill} ${conflictBadges}</td>
+      const lastLog = lastLogFor(j.id);
+      const errorLine = (j.last_run_status && j.last_run_status !== "ok" && lastLog)
+        ? `<div class="hint" style="color:#ff9a9a">${escapeHtml(lastLog.message)}</div>` : "";
+      const sameAccountWarning = (j.source_account_id === j.dest_account_id)
+        ? `<div class="hint" style="color:#ffcf6b">${dict[lang].sameAccountWarning}</div>` : "";
+      return `<tr><td>${j.name}${sameAccountWarning}</td><td>${accName(j.source_account_id)}</td><td>${accName(j.dest_account_id)}</td><td>${j.direction}</td><td>${statusPill} ${conflictBadges}${errorLine}</td>
       <td><button onclick="runJob('${j.id}')">${dict[lang].run}</button><button onclick="delJob('${j.id}')">${dict[lang].del}</button></td></tr>`;
     }).join("") + "</table>") : "<p>-</p>";
+}
+
+function escapeHtml(s){
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
 async function renderLogs(){
