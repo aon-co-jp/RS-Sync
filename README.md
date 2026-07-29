@@ -8,7 +8,11 @@ Git repository sync/backup tool across multiple git-hosting providers
 
 - Register **accounts** (source/destination) for a git-hosting provider,
   storing name/API base/git base/owner/token in a local JSON file
-  (`data/store.json`, gitignored — never committed).
+  (`data/store.json`, gitignored — never committed). Read via
+  [RustJSON](src/rustjson.rs) (a lenient JSON superset — trailing commas,
+  comments, unquoted keys — ported from open-redmine/RPoem, matching the
+  rest of this ecosystem); write is still standard pretty-printed JSON, so
+  the file stays readable and hand-editable.
 - Define **sync jobs**: source account -> destination account, one-way or
   two-way, for a chosen repo list (or "all repos" via provider discovery).
 - **Schedule** each job by "every N hours", day-of-week + time-of-day, and/or

@@ -132,6 +132,50 @@ cargo test --test sync_integration -- --test-threads=1
     インストーラー・deb/msiパッケージング、(6)
     `/root/sync-repos.sh`のcronをRS-Syncへ最終的に一本化するかの判断。
 
+## HANDOFF追記(2026-07-29続き4) 実バグ修正: 空トークンアカウントで401 + RustJSONへの移行
+
+ユーザーが実際にクイック設定GUIで`aon-co-jp`(公開リポジトリのみ、トークン
+未入力)→`OpenRuno`のジョブを作成したところ`error`ステータスになり、
+本番の`data/store.json`を直接確認した上での質問「RJSONを使って開発した
+のではないのですか?」への対応(RustJSON移行+ちょうど見つかった実バグの
+修正を同じパスで対応)。
+
+1. **実バグの原因**: `store.json`を直接読んだところ`master-aon-co-jp`
+   アカウントの`token`が空文字列(UIの「公開リポジトリのみなら空欄可」
+   ヒント通りの入力)。しかし`GitHubProvider`は空トークンでも
+   `Authorization: token `(空値)ヘッダーを常に送信しており、GitHub API
+   はこれを匿名アクセスへフォールバックさせず`401 Unauthorized`で
+   拒否していた(ヘッダー自体を送らなければ匿名アクセスとして扱われる
+   ことを`curl`で実際に確認: `GET /users/aon-co-jp/repos`は無認証で
+   `200`)。
+2. **修正**: `maybe_auth_header()`ヘルパーを新設し、トークンが空の場合は
+   `Authorization`ヘッダー自体を付与しないよう`GitHubProvider`の
+   `list_repos`/`ensure_repo`全呼び出し箇所を修正。`remote_url()`も
+   空トークン時は`https://<token>@`のプレフィックス自体を省略するよう
+   修正(空ユーザー名+`@`が一部のgit/HTTPクライアントの組み合わせで
+   混乱を招くため)。新規テスト4件(`provider::tests`)で回帰確認。
+3. **RustJSONへの移行**(ユーザー指示、他リポジトリとの一貫性のため):
+   `open-redmine`の`src/rustjson.rs`(緩い構文のJSONパーサー、パース
+   結果は標準`serde_json::Value`)をそのまま移植。`model::AppState::new`
+   の読み込みを`serde_json::from_str`から`rustjson::parse_typed`へ変更
+   (書き込みは引き続き`serde_json::to_string_pretty`、可読性維持)。
+   `thiserror`依存を追加。新規テスト3件(`model::tests`、既存の標準JSON
+   ファイルの後方互換読み込み・緩い構文での読み込み・ファイル未存在時の
+   既定値フォールバックを確認)。
+4. **検証(実測)**: `cargo test --lib`17件全green(新規7件)、
+   `cargo test --test sync_integration -- --test-threads=1`2件green
+   (回帰無し)。ネットワークレベルでも`curl`で
+   `https://api.github.com/orgs/aon-co-jp/repos`→`404`(aon-co-jpは
+   Organizationではなく通常のUserアカウント、既知の事実の再確認)・
+   `https://api.github.com/users/aon-co-jp/repos`→`200`(無認証)を確認。
+   VPS本番・デモ両方へデプロイ済み。
+5. **正直な開示**: 実際に本番で作成された`aon-co-jp -> OpenRuno`
+   ジョブを、この修正後に再実行して成功することの確認はユーザー自身の
+   操作(「今すぐ同期」クリック)が必要——本番はログイン必須のため
+   エージェント側からは実行できない。
+  - 次にすべきこと: ユーザーが本番で該当ジョブを再実行し、成功する
+    ことを確認すること。
+
 ## HANDOFF追記(2026-07-29続き2) クイック設定GUI+ダークテーマの可読性修正(ユーザー指摘対応)
 
 1. **クイック設定パネルを新規追加**(ユーザー指示「aon-co-jpをマスターとして

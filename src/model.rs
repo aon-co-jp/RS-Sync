@@ -105,8 +105,8 @@ pub struct AppState {
 impl AppState {
     pub fn new(data_file: &str) -> Self {
         let store = if Path::new(data_file).exists() {
-            let raw = fs::read_to_string(data_file).unwrap_or_default();
-            serde_json::from_str(&raw).unwrap_or_default()
+            let raw = fs::read(data_file).unwrap_or_default();
+            crate::rustjson::parse_typed(&raw).unwrap_or_default()
         } else {
             Store::default()
         };
@@ -129,4 +129,45 @@ impl AppState {
 
 pub fn new_id() -> String {
     Uuid::new_v4().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 2026-07-29追記: RustJSON移行の後方互換確認。既存の
+    /// (標準JSONで書かれた)`store.json`が引き続き問題なく読み込める
+    /// ことを確認する。
+    #[test]
+    fn loads_pre_existing_strict_json_store_without_modification() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store.json");
+        fs::write(&path, r#"{"accounts":[],"jobs":[],"logs":[]}"#).unwrap();
+        let state = AppState::new(path.to_str().unwrap());
+        let store = state.store.lock().unwrap();
+        assert!(store.accounts.is_empty());
+        assert!(store.jobs.is_empty());
+    }
+
+    /// RustJSONの緩い構文(トレイリングカンマ・コメント)でも読み込める
+    /// ことを確認する(手動編集した場合を想定)。
+    #[test]
+    fn loads_loosely_formatted_rustjson_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store.json");
+        fs::write(&path, "{\n  // hand-edited\n  \"accounts\": [],\n  \"jobs\": [],\n  \"logs\": [],\n}").unwrap();
+        let state = AppState::new(path.to_str().unwrap());
+        let store = state.store.lock().unwrap();
+        assert!(store.accounts.is_empty());
+    }
+
+    #[test]
+    fn missing_file_falls_back_to_default_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("does-not-exist.json");
+        let state = AppState::new(path.to_str().unwrap());
+        let store = state.store.lock().unwrap();
+        assert!(store.accounts.is_empty());
+        assert!(store.jobs.is_empty());
+    }
 }
