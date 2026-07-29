@@ -25,6 +25,34 @@ fn healthz() -> &'static str {
     "ok"
 }
 
+/// 2026-07-29追記(ユーザー指示「このようなBUGが起きないか定期的に自動
+/// チェックする機能」): スケジューラのバックグラウンドループが実際に
+/// 生きているかを外部から確認できるエンドポイント。
+/// `scheduler_last_tick`は1分ごとに更新されるはずなので、3分(180秒)
+/// 以上更新が無ければ異常("healthy": false)とみなす——今回発生した
+/// 「ループが無言のまま永久停止」というバグを、次回は数分以内に検知
+/// できるようにするための仕組み。認証不要(`/healthz`と同じ扱い、外部の
+/// 死活監視ツールから直接叩けるようにするため)。
+#[handler]
+fn healthz_scheduler(state: Data<&Arc<AppState>>) -> Response {
+    let last_tick = *state.scheduler_last_tick.lock().unwrap();
+    let seconds_since_tick = (chrono::Utc::now() - last_tick).num_seconds();
+    let healthy = seconds_since_tick < 180;
+    let status = if healthy { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+    json_ok_with_status(
+        status,
+        &serde_json::json!({
+            "healthy": healthy,
+            "scheduler_last_tick": last_tick.to_rfc3339(),
+            "seconds_since_tick": seconds_since_tick,
+        }),
+    )
+}
+
+fn json_ok_with_status(status: StatusCode, value: &serde_json::Value) -> Response {
+    Response::builder().status(status).content_type("application/json").body(value.to_string())
+}
+
 /// GET /api/accountsのレスポンス専用のトークン非公開ビュー。
 /// **セキュリティ上重要**: `Account.token`(GitHub PAT等の実トークン)を
 /// 一覧APIへそのままシリアライズすると、ログイン済みブラウザは元より、
@@ -334,6 +362,7 @@ fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::End
     Route::new()
         .at("/", get(index))
         .at("/healthz", get(healthz))
+        .at("/healthz/scheduler", get(healthz_scheduler))
         .at("/api/auth/request-otp", post(request_otp))
         .at("/api/auth/verify-otp", post(verify_otp))
         .at("/api/auth/logout", post(logout))
@@ -488,6 +517,26 @@ mod tests {
             .send()
             .await;
         missing_resp.assert_status(StatusCode::NOT_FOUND);
+    }
+
+    /// 2026-07-29追記: `GET /healthz/scheduler`が、直近のtickが新しければ
+    /// healthy=true・503ではなく200を返すことを確認する(回帰確認)。
+    /// 実際に「ハートビートが更新されなくなる」異常系は`scheduler.rs`側の
+    /// ロジック(180秒しきい値)そのものに対するユニットテストではなく、
+    /// ここでは「正常時に200かつhealthy:trueを返す」という基本契約のみを
+    /// 検証する(スケジューラループ自体の統合テストは60秒間隔のtickを
+    /// 待つ必要がありコストが高いため、意図的にスコープ外とした)。
+    #[tokio::test]
+    async fn healthz_scheduler_reports_healthy_when_tick_is_recent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, auth_state) = make_state(&tmp, true);
+        let app = build_app(state, auth_state);
+        let client = TestClient::new(app);
+
+        let resp = client.get("/healthz/scheduler").send().await;
+        resp.assert_status_is_ok();
+        let body: serde_json::Value = resp.0.into_body().into_json().await.unwrap();
+        assert_eq!(body["healthy"], serde_json::json!(true));
     }
 
     #[tokio::test]

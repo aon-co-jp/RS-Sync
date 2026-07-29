@@ -14,6 +14,11 @@ pub async fn run_scheduler_loop(state: Arc<AppState>) {
     loop {
         interval.tick().await;
         let now = Utc::now();
+        // ハートビート更新(2026-07-29追記): このループが実際に生きている
+        // ことの証跡。ジョブ処理は`spawn_blocking`経由(下記)なのでここは
+        // 一切ブロックされず、ジョブがどれだけ時間がかかろうと・
+        // ハングしようと、このtickだけは1分ごとに必ず更新され続ける。
+        *state.scheduler_last_tick.lock().unwrap() = now;
 
         let due_job_ids: Vec<String> = {
             let store = state.store.lock().unwrap();

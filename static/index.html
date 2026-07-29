@@ -214,6 +214,9 @@ a{color:#5fb3ff}
 </form>
 </details>
 
+<h2 data-i18n="schedulerHealthH">スケジューラの稼働状況</h2>
+<p id="scheduler-health" class="hint">-</p>
+
 <h2 data-i18n="logsH">実行ログ</h2>
 <div id="logs"></div>
 
@@ -252,7 +255,8 @@ const dict = {
    quickCreate:"この設定でまとめて作成",
    everyHoursLabel:"(補足)代わりに「何時間ごと」で指定したい場合(上の分指定と併用可、両方空欄なら自動実行しない)",
    logsH:"実行ログ", run:"今すぐ同期", del:"削除", resolve:"解決済みにする",
-   sameAccountWarning:"⚠ ソースと宛先が同じアカウントです(意図した設定か確認してください)"},
+   sameAccountWarning:"⚠ ソースと宛先が同じアカウントです(意図した設定か確認してください)",
+   schedulerHealthH:"スケジューラの稼働状況", schedulerHealthy:"正常稼働中", schedulerUnhealthy:"⚠ 停止している可能性(3分以上無応答)", schedulerHealthUnknown:"確認できませんでした"},
  en: {title:"RS-Sync — Git Repository Sync Tool", intro:"One-way backup or two-way sync of repositories across GitHub / open-gitea / Gitea / Gitbucket.",
    loginH:"Login", loginNote:"For security reasons, only the registered admin email can log in.",
    loginEmailLabel:"Admin email address", sendCode:"Send code", loginCodeLabel:"Received code (6 digits)", login:"Log in",
@@ -284,7 +288,8 @@ const dict = {
    quickCreate:"Create this setup",
    everyHoursLabel:"(Alternative) Specify \"every N hours\" instead (can be combined with the minutes field above; empty on both = no automatic runs)",
    logsH:"Run log", run:"Sync now", del:"Delete", resolve:"Mark resolved",
-   sameAccountWarning:"⚠ Source and destination are the same account (check this is intentional)"}
+   sameAccountWarning:"⚠ Source and destination are the same account (check this is intentional)",
+   schedulerHealthH:"Scheduler status", schedulerHealthy:"Running normally", schedulerUnhealthy:"⚠ May be stuck (no heartbeat for 3+ min)", schedulerHealthUnknown:"Could not check"}
 };
 let lang = "ja";
 function applyI18n(){
@@ -434,7 +439,26 @@ async function renderLogs(){
   document.getElementById("logs").innerHTML = logs.map(l=>`<pre>[${l.started_at}] ${l.success?"OK":"ERR"}\n${l.message}</pre>`).join("");
 }
 
+async function renderSchedulerHealth(){
+  // 認証不要のエンドポイント(2026-07-29追記、ハートビート機能)。
+  // ログインしていなくても異常を確認できるようにあえて`api()`
+  // (Bearerヘッダ付与・401ハンドリング)を経由せず直接fetchする。
+  const el = document.getElementById("scheduler-health");
+  try {
+    const r = await fetch("healthz/scheduler");
+    const body = await r.json();
+    if (body.healthy) {
+      el.innerHTML = `<span class="pill ok">${dict[lang].schedulerHealthy}</span> (${body.seconds_since_tick}s)`;
+    } else {
+      el.innerHTML = `<span class="pill err">${dict[lang].schedulerUnhealthy}</span> (${body.seconds_since_tick}s)`;
+    }
+  } catch(e) {
+    el.textContent = dict[lang].schedulerHealthUnknown;
+  }
+}
+
 async function renderAll(){
+  renderSchedulerHealth();
   if (!sessionToken()) return;
   try {
     const accs = await renderAccounts();
@@ -442,6 +466,9 @@ async function renderAll(){
     await renderLogs();
   } catch(e) { /* 401 already handled in api() */ }
 }
+
+// 30秒ごとに稼働状況を自動更新(ログイン状態に関わらず)。
+setInterval(renderSchedulerHealth, 30000);
 
 async function delAcc(id){ await api("api/accounts/"+id, {method:"DELETE"}); renderAll(); }
 async function delJob(id){ await api("api/jobs/"+id, {method:"DELETE"}); renderAll(); }

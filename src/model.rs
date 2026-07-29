@@ -100,6 +100,15 @@ pub struct Store {
 pub struct AppState {
     pub store: Mutex<Store>,
     pub data_file: String,
+    /// 2026-07-29追記(ユーザー指示「このようなBUGが起きないか定期的に
+    /// 自動チェックする機能」): スケジューラのバックグラウンドループが
+    /// 実際に「生きている」ことを外部から確認できるハートビート。
+    /// `scheduler::run_scheduler_loop`が1分ごとのtickのたびに更新する。
+    /// 今回のバグ(ブロッキングI/Oでループ全体が無言のまま永久停止)は、
+    /// このタイムスタンプが更新され続けているかを見れば即座に検知できた
+    /// はず——`GET /healthz`にこの値を含め、一定時間(3分)更新が無ければ
+    /// 異常とみなす。
+    pub scheduler_last_tick: Mutex<DateTime<Utc>>,
 }
 
 impl AppState {
@@ -113,6 +122,7 @@ impl AppState {
         Self {
             store: Mutex::new(store),
             data_file: data_file.to_string(),
+            scheduler_last_tick: Mutex::new(Utc::now()),
         }
     }
 
