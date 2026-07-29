@@ -21,6 +21,8 @@ fn make_account(name: &str, dir: &std::path::Path) -> Account {
         git_base: dir.to_str().unwrap().to_string(),
         owner: "test".to_string(),
         token: String::new(),
+        token_expires_at: None,
+        expiry_warning_sent: false,
     }
 }
 
