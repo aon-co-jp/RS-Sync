@@ -73,6 +73,30 @@ fn http_client() -> reqwest::blocking::Client {
         .expect("http client")
 }
 
+/// Adds an `Authorization`-style header only when `token` is non-empty.
+///
+/// **Real bug fixed 2026-07-29**: accounts with an empty token (documented
+/// in the UI as valid for "public repos only") were still sending a
+/// malformed header like `Authorization: token ` (empty value) on every
+/// request. GitHub's API treats that as an actual failed authentication
+/// attempt and returns `401 Unauthorized` — it does **not** fall back to
+/// anonymous access the way omitting the header entirely does. Found via
+/// a real quick-setup job that failed with "repo discovery failed: GitHub
+/// list_repos failed: 401 Unauthorized" despite the account being valid
+/// for anonymous/public access.
+fn maybe_auth_header(
+    req: reqwest::blocking::RequestBuilder,
+    header_name: &str,
+    token: &str,
+    format_value: impl Fn(&str) -> String,
+) -> reqwest::blocking::RequestBuilder {
+    if token.is_empty() {
+        req
+    } else {
+        req.header(header_name, format_value(token))
+    }
+}
+
 // ---------------- GitHub (fully implemented) ----------------
 
 pub struct GitHubProvider;
@@ -94,9 +118,7 @@ impl Provider for GitHubProvider {
                 account.owner,
                 page
             );
-            let resp = client
-                .get(&url)
-                .header("Authorization", format!("token {}", account.token))
+            let resp = maybe_auth_header(client.get(&url), "Authorization", &account.token, |t| format!("token {t}"))
                 .header("Accept", "application/vnd.github+json")
                 .send()?;
             // Fall back to the /users/:user/repos endpoint if this isn't an org.
@@ -107,9 +129,7 @@ impl Provider for GitHubProvider {
                     account.owner,
                     page
                 );
-                client
-                    .get(&user_url)
-                    .header("Authorization", format!("token {}", account.token))
+                maybe_auth_header(client.get(&user_url), "Authorization", &account.token, |t| format!("token {t}"))
                     .header("Accept", "application/vnd.github+json")
                     .send()?
             } else {
@@ -140,9 +160,7 @@ impl Provider for GitHubProvider {
             account.owner,
             repo
         );
-        let resp = client
-            .get(&check_url)
-            .header("Authorization", format!("token {}", account.token))
+        let resp = maybe_auth_header(client.get(&check_url), "Authorization", &account.token, |t| format!("token {t}"))
             .header("Accept", "application/vnd.github+json")
             .send()?;
         if resp.status().is_success() {
@@ -154,9 +172,7 @@ impl Provider for GitHubProvider {
             account.owner
         );
         let body = serde_json::json!({ "name": repo, "private": true });
-        let resp = client
-            .post(&create_url)
-            .header("Authorization", format!("token {}", account.token))
+        let resp = maybe_auth_header(client.post(&create_url), "Authorization", &account.token, |t| format!("token {t}"))
             .header("Accept", "application/vnd.github+json")
             .json(&body)
             .send()?;
@@ -165,9 +181,7 @@ impl Provider for GitHubProvider {
         }
         // Retry against /user/repos in case owner is a personal account, not an org.
         let user_create_url = format!("{}/user/repos", account.api_base.trim_end_matches('/'));
-        let resp = client
-            .post(&user_create_url)
-            .header("Authorization", format!("token {}", account.token))
+        let resp = maybe_auth_header(client.post(&user_create_url), "Authorization", &account.token, |t| format!("token {t}"))
             .header("Accept", "application/vnd.github+json")
             .json(&body)
             .send()?;
@@ -179,13 +193,20 @@ impl Provider for GitHubProvider {
     }
 
     fn remote_url(&self, account: &Account, repo: &str) -> String {
-        // https://<token>@github.com/<owner>/<repo>.git
+        // https://<token>@github.com/<owner>/<repo>.git — omit the
+        // "<token>@" prefix entirely when the token is empty (anonymous
+        // clone of a public repo); a literal empty username before `@`
+        // confuses some git/HTTP client combinations.
         let base = account
             .git_base
             .trim_end_matches('/')
             .replacen("https://", "", 1)
             .replacen("http://", "", 1);
-        format!("https://{}@{}/{}/{}.git", account.token, base, account.owner, repo)
+        if account.token.is_empty() {
+            format!("https://{}/{}/{}.git", base, account.owner, repo)
+        } else {
+            format!("https://{}@{}/{}/{}.git", account.token, base, account.owner, repo)
+        }
     }
 }
 
@@ -528,4 +549,61 @@ fn urlencode(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::ProviderKind;
+
+    fn account(token: &str) -> Account {
+        Account {
+            id: "1".to_string(),
+            name: "test".to_string(),
+            provider: ProviderKind::GitHub,
+            api_base: "https://api.github.com".to_string(),
+            git_base: "https://github.com".to_string(),
+            owner: "aon-co-jp".to_string(),
+            token: token.to_string(),
+        }
+    }
+
+    /// 2026-07-29発見の実バグの回帰確認: 空トークンのアカウントで
+    /// `remote_url`が生成するgit URLに、空のユーザー名+`@`が残っていない
+    /// ことを確認する(残っていると一部のgit/HTTPクライアントの組み合わせで
+    /// 混乱を招く)。
+    #[test]
+    fn github_remote_url_omits_empty_token_prefix() {
+        let provider = GitHubProvider;
+        let url = provider.remote_url(&account(""), "myrepo");
+        assert_eq!(url, "https://github.com/aon-co-jp/myrepo.git");
+    }
+
+    #[test]
+    fn github_remote_url_embeds_nonempty_token() {
+        let provider = GitHubProvider;
+        let url = provider.remote_url(&account("ghp_secret"), "myrepo");
+        assert_eq!(url, "https://ghp_secret@github.com/aon-co-jp/myrepo.git");
+    }
+
+    /// 2026-07-29発見の実バグの回帰確認: 空トークンの場合、
+    /// `Authorization`ヘッダ自体を送らないことを確認する(送ると
+    /// GitHub APIが匿名アクセスにフォールバックせず401を返してしまう
+    /// ——実際にクイック設定GUIで空トークンのアカウントを使った際に
+    /// 発生した実障害)。
+    #[test]
+    fn maybe_auth_header_skips_header_when_token_is_empty() {
+        let client = http_client();
+        let req = maybe_auth_header(client.get("https://example.invalid"), "Authorization", "", |t| format!("token {t}"));
+        let built = req.build().unwrap();
+        assert!(built.headers().get("Authorization").is_none());
+    }
+
+    #[test]
+    fn maybe_auth_header_adds_header_when_token_is_present() {
+        let client = http_client();
+        let req = maybe_auth_header(client.get("https://example.invalid"), "Authorization", "secret", |t| format!("token {t}"));
+        let built = req.build().unwrap();
+        assert_eq!(built.headers().get("Authorization").unwrap(), "token secret");
+    }
 }
