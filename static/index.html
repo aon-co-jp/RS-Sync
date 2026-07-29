@@ -214,6 +214,72 @@ a{color:#5fb3ff}
 </form>
 </details>
 
+<h2 data-i18n="folderH">フォルダ同期(GitHub等とは別、レンタルサーバー・VPS・ローカルドライブ・スマホ・NAS間のファイルコピー)</h2>
+<p class="muted" data-i18n="folderHint">
+  gitリポジトリを前提としない、単純なフォルダ間のファイルコピー同期です。
+  接続先はローカルドライブ(このサーバー自身のファイルシステム)、または
+  SFTP(VPS・レンタルサーバー・NAS・Termux等を入れたスマホ)を選べます。
+  一方向コピーのみ(宛先に無い、またはサイズが違うファイルだけを転送)。
+</p>
+<div id="folder-endpoints"></div>
+<details><summary data-i18n="addFolderEndpoint">接続先を追加</summary>
+<form id="folderEndpointForm">
+<label for="fe-name" data-i18n="feNameLabel">表示名</label>
+<input id="fe-name" name="name" placeholder="例: 自宅NAS" required>
+
+<label for="fe-kind" data-i18n="feKindLabel">種類</label>
+<select id="fe-kind" name="kind">
+  <option value="Local" data-i18n="feKindLocal">ローカルドライブ(このサーバー自身)</option>
+  <option value="Sftp" data-i18n="feKindSftp">SFTP(VPS・レンタルサーバー・NAS・スマホ)</option>
+</select>
+
+<label for="fe-path" data-i18n="fePathLabel">パス(ローカルなら絶対パス、SFTPなら接続先のディレクトリ)</label>
+<input id="fe-path" name="path" placeholder="例: /var/backups または C:\data">
+
+<div id="fe-sftp-fields">
+  <label for="fe-host" data-i18n="feHostLabel">ホスト名/IPアドレス(SFTPのみ)</label>
+  <input id="fe-host" name="host" placeholder="例: 203.0.113.10">
+  <label for="fe-port" data-i18n="fePortLabel">ポート(SFTPのみ、既定22)</label>
+  <input id="fe-port" name="port" type="number" value="22">
+  <label for="fe-username" data-i18n="feUsernameLabel">ユーザー名(SFTPのみ)</label>
+  <input id="fe-username" name="username" placeholder="例: root">
+  <label for="fe-password" data-i18n="fePasswordLabel">パスワード(SFTPのみ、秘密鍵を使うなら空欄可)</label>
+  <input id="fe-password" name="password" type="password">
+  <label for="fe-key" data-i18n="feKeyLabel">秘密鍵ファイルのパス(SFTPのみ、このサーバー上のパス。パスワードより優先)</label>
+  <input id="fe-key" name="private_key_path" placeholder="例: /root/.ssh/id_ed25519">
+</div>
+
+<div><button type="submit" data-i18n="save">保存</button></div>
+</form>
+</details>
+
+<h3 data-i18n="folderJobsH">フォルダ同期ジョブ</h3>
+<div id="folder-jobs"></div>
+<details><summary data-i18n="addFolderJob">ジョブを追加</summary>
+<form id="folderJobForm">
+<label for="fj-name" data-i18n="jobNameLabel">ジョブ名(自分が分かればどんな名前でも可)</label>
+<input id="fj-name" name="name" placeholder="例: NAS→VPSバックアップ" required>
+
+<label for="fj-source" data-i18n="source">ソース(コピー元)</label>
+<select name="source_endpoint_id" id="feSrcSel"></select>
+
+<label for="fj-dest" data-i18n="dest">宛先(コピー先)</label>
+<select name="dest_endpoint_id" id="feDstSel"></select>
+
+<label for="fj-realtime" data-i18n="realtime">何分ごとに自動実行するか(リアルタイム・15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)</label>
+<div class="buttons">
+  <button type="button" data-i18n="presetRealtime" onclick="document.getElementById('fj-realtime').value=1">リアルタイム(1分ごと)</button>
+  <button type="button" data-i18n="preset15" onclick="document.getElementById('fj-realtime').value=15">15分ごと</button>
+  <button type="button" data-i18n="preset30" onclick="document.getElementById('fj-realtime').value=30">30分ごと</button>
+  <button type="button" data-i18n="preset60" onclick="document.getElementById('fj-realtime').value=60">1時間ごと</button>
+  <button type="button" data-i18n="presetClear" onclick="document.getElementById('fj-realtime').value=''">クリア</button>
+</div>
+<input id="fj-realtime" name="realtime_poll_minutes" type="number" min="1" placeholder="例: 45">
+
+<div><button type="submit" data-i18n="save">保存</button></div>
+</form>
+</details>
+
 <h2 data-i18n="schedulerHealthH">スケジューラの稼働状況</h2>
 <p id="scheduler-health" class="hint">-</p>
 
@@ -256,7 +322,16 @@ const dict = {
    everyHoursLabel:"(補足)代わりに「何時間ごと」で指定したい場合(上の分指定と併用可、両方空欄なら自動実行しない)",
    logsH:"実行ログ", run:"今すぐ同期", del:"削除", resolve:"解決済みにする",
    sameAccountWarning:"⚠ ソースと宛先が同じアカウントです(意図した設定か確認してください)",
-   schedulerHealthH:"スケジューラの稼働状況", schedulerHealthy:"正常稼働中", schedulerUnhealthy:"⚠ 停止している可能性(3分以上無応答)", schedulerHealthUnknown:"確認できませんでした"},
+   schedulerHealthH:"スケジューラの稼働状況", schedulerHealthy:"正常稼働中", schedulerUnhealthy:"⚠ 停止している可能性(3分以上無応答)", schedulerHealthUnknown:"確認できませんでした",
+   folderH:"フォルダ同期(GitHub等とは別、レンタルサーバー・VPS・ローカルドライブ・スマホ・NAS間のファイルコピー)",
+   folderHint:"gitリポジトリを前提としない、単純なフォルダ間のファイルコピー同期です。接続先はローカルドライブ(このサーバー自身のファイルシステム)、またはSFTP(VPS・レンタルサーバー・NAS・Termux等を入れたスマホ)を選べます。一方向コピーのみ(宛先に無い、またはサイズが違うファイルだけを転送)。",
+   addFolderEndpoint:"接続先を追加", feNameLabel:"表示名", feKindLabel:"種類",
+   feKindLocal:"ローカルドライブ(このサーバー自身)", feKindSftp:"SFTP(VPS・レンタルサーバー・NAS・スマホ)",
+   fePathLabel:"パス(ローカルなら絶対パス、SFTPなら接続先のディレクトリ)",
+   feHostLabel:"ホスト名/IPアドレス(SFTPのみ)", fePortLabel:"ポート(SFTPのみ、既定22)",
+   feUsernameLabel:"ユーザー名(SFTPのみ)", fePasswordLabel:"パスワード(SFTPのみ、秘密鍵を使うなら空欄可)",
+   feKeyLabel:"秘密鍵ファイルのパス(SFTPのみ、このサーバー上のパス。パスワードより優先)",
+   folderJobsH:"フォルダ同期ジョブ", addFolderJob:"ジョブを追加"},
  en: {title:"RS-Sync — Git Repository Sync Tool", intro:"One-way backup or two-way sync of repositories across GitHub / open-gitea / Gitea / Gitbucket.",
    loginH:"Login", loginNote:"For security reasons, only the registered admin email can log in.",
    loginEmailLabel:"Admin email address", sendCode:"Send code", loginCodeLabel:"Received code (6 digits)", login:"Log in",
@@ -289,7 +364,16 @@ const dict = {
    everyHoursLabel:"(Alternative) Specify \"every N hours\" instead (can be combined with the minutes field above; empty on both = no automatic runs)",
    logsH:"Run log", run:"Sync now", del:"Delete", resolve:"Mark resolved",
    sameAccountWarning:"⚠ Source and destination are the same account (check this is intentional)",
-   schedulerHealthH:"Scheduler status", schedulerHealthy:"Running normally", schedulerUnhealthy:"⚠ May be stuck (no heartbeat for 3+ min)", schedulerHealthUnknown:"Could not check"}
+   schedulerHealthH:"Scheduler status", schedulerHealthy:"Running normally", schedulerUnhealthy:"⚠ May be stuck (no heartbeat for 3+ min)", schedulerHealthUnknown:"Could not check",
+   folderH:"Folder sync (separate from GitHub etc. — plain file copy between rented servers, VPS, local drives, phones, NAS)",
+   folderHint:"Plain folder-to-folder file copy sync, no git repository involved. Destinations can be a local drive (this server's own filesystem) or SFTP (VPS, rented servers, NAS, or a phone with an SFTP app like Termux). One-way copy only (transfers files missing from, or a different size than, the destination).",
+   addFolderEndpoint:"Add endpoint", feNameLabel:"Display name", feKindLabel:"Kind",
+   feKindLocal:"Local drive (this server itself)", feKindSftp:"SFTP (VPS, rented server, NAS, phone)",
+   fePathLabel:"Path (absolute path if local, remote directory if SFTP)",
+   feHostLabel:"Hostname/IP (SFTP only)", fePortLabel:"Port (SFTP only, default 22)",
+   feUsernameLabel:"Username (SFTP only)", fePasswordLabel:"Password (SFTP only, leave empty if using a private key)",
+   feKeyLabel:"Private key file path (SFTP only, path on this server; takes priority over password)",
+   folderJobsH:"Folder sync jobs", addFolderJob:"Add job"}
 };
 let lang = "ja";
 function applyI18n(){
@@ -457,12 +541,48 @@ async function renderSchedulerHealth(){
   }
 }
 
+async function renderFolderEndpoints(){
+  const eps = await api("api/folder-endpoints");
+  document.getElementById("folder-endpoints").innerHTML = eps.length ? (`<table><tr><th>${dict[lang].source}</th><th>${dict[lang].feKindLabel}</th><th>Path</th><th>${dict[lang].tokenCol}</th><th></th></tr>` +
+    eps.map(e=>{
+      const kindLabel = e.kind === "Sftp" ? dict[lang].feKindSftp : dict[lang].feKindLocal;
+      const credBadge = e.kind === "Local" ? "-" : (e.credentials_set ? `<span class="pill ok">${dict[lang].tokenSet}</span>` : `<span class="pill err">${dict[lang].tokenNotSet}</span>`);
+      return `<tr><td>${e.name}</td><td>${kindLabel}</td><td>${e.path}${e.kind==="Sftp" ? " ("+e.username+"@"+e.host+":"+e.port+")" : ""}</td><td>${credBadge}</td><td><button onclick="delFolderEndpoint('${e.id}')">${dict[lang].del}</button></td></tr>`;
+    }).join("") + "</table>") : "<p>-</p>";
+  const opts = eps.map(e=>`<option value="${e.id}">${e.name}</option>`).join("");
+  document.getElementById("feSrcSel").innerHTML = opts;
+  document.getElementById("feDstSel").innerHTML = opts;
+  return eps;
+}
+
+async function renderFolderJobs(eps){
+  const jobs = await api("api/folder-jobs");
+  const logs = await api("api/logs");
+  const epName = id => (eps.find(e=>e.id===id)||{}).name || id;
+  const lastLogFor = jobId => logs.find(l => l.job_id === jobId);
+  document.getElementById("folder-jobs").innerHTML = jobs.length ? (`<table><tr><th>Name</th><th>${dict[lang].source}</th><th>${dict[lang].dest}</th><th>Status</th><th></th></tr>` +
+    jobs.map(j=>{
+      const statusPill = j.last_run_status ? `<span class="pill ${j.last_run_status==='ok'?'ok':'err'}">${j.last_run_status}</span>` : "-";
+      const lastLog = lastLogFor(j.id);
+      const errorLine = (j.last_run_status && j.last_run_status !== "ok" && lastLog)
+        ? `<div class="hint" style="color:#ff9a9a">${escapeHtml(lastLog.message)}</div>` : "";
+      return `<tr><td>${j.name}</td><td>${epName(j.source_endpoint_id)}</td><td>${epName(j.dest_endpoint_id)}</td><td>${statusPill}${errorLine}</td>
+      <td><button onclick="runFolderJob('${j.id}')">${dict[lang].run}</button><button onclick="delFolderJob('${j.id}')">${dict[lang].del}</button></td></tr>`;
+    }).join("") + "</table>") : "<p>-</p>";
+}
+
+async function delFolderEndpoint(id){ await api("api/folder-endpoints/"+id, {method:"DELETE"}); renderAll(); }
+async function delFolderJob(id){ await api("api/folder-jobs/"+id, {method:"DELETE"}); renderAll(); }
+async function runFolderJob(id){ await api("api/folder-jobs/"+id+"/run", {method:"POST"}); renderAll(); }
+
 async function renderAll(){
   renderSchedulerHealth();
   if (!sessionToken()) return;
   try {
     const accs = await renderAccounts();
     await renderJobs(accs);
+    const eps = await renderFolderEndpoints();
+    await renderFolderJobs(eps);
     await renderLogs();
   } catch(e) { /* 401 already handled in api() */ }
 }
@@ -493,6 +613,28 @@ document.getElementById("jobForm").onsubmit = async (e)=>{
     name:f.get("name"), source_account_id:f.get("source_account_id"), dest_account_id:f.get("dest_account_id"),
     direction:f.get("direction"), repos,
     schedule:{ every_hours: f.get("every_hours")?parseInt(f.get("every_hours")):null, days_of_week:[], hour:null, minute:null,
+      realtime_poll_minutes: f.get("realtime_poll_minutes")?parseInt(f.get("realtime_poll_minutes")):null }
+  })});
+  e.target.reset(); renderAll();
+};
+
+document.getElementById("folderEndpointForm").onsubmit = async (e)=>{
+  e.preventDefault();
+  const f = new FormData(e.target);
+  await api("api/folder-endpoints", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
+    id:"", name:f.get("name"), kind:f.get("kind"), path:f.get("path"),
+    host:f.get("host")||"", port:f.get("port")?parseInt(f.get("port")):22,
+    username:f.get("username")||"", password:f.get("password")||"", private_key_path:f.get("private_key_path")||""
+  })});
+  e.target.reset(); renderAll();
+};
+
+document.getElementById("folderJobForm").onsubmit = async (e)=>{
+  e.preventDefault();
+  const f = new FormData(e.target);
+  await api("api/folder-jobs", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
+    name:f.get("name"), source_endpoint_id:f.get("source_endpoint_id"), dest_endpoint_id:f.get("dest_endpoint_id"),
+    schedule:{ every_hours:null, days_of_week:[], hour:null, minute:null,
       realtime_poll_minutes: f.get("realtime_poll_minutes")?parseInt(f.get("realtime_poll_minutes")):null }
   })});
   e.target.reset(); renderAll();

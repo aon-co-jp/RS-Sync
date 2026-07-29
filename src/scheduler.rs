@@ -44,13 +44,32 @@ pub async fn run_scheduler_loop(state: Arc<AppState>) {
             let state = state.clone();
             tokio::task::spawn_blocking(move || execute_job(state, &job_id));
         }
+
+        // 2026-07-29追記: フォルダ同期ジョブ(gitホスティング非依存、
+        // `folder_sync`参照)も同じループ・同じ`spawn_blocking`方式で
+        // 処理する。
+        let due_folder_job_ids: Vec<String> = {
+            let store = state.store.lock().unwrap();
+            store
+                .folder_jobs
+                .iter()
+                .filter(|j| j.enabled)
+                .filter(|j| is_due_schedule(&j.schedule, j.last_run_at, &now))
+                .map(|j| j.id.clone())
+                .collect()
+        };
+        for job_id in due_folder_job_ids {
+            let state = state.clone();
+            tokio::task::spawn_blocking(move || execute_folder_job(state, &job_id));
+        }
     }
 }
 
 fn is_due(job: &crate::model::SyncJob, now: &chrono::DateTime<Utc>) -> bool {
-    let sched = &job.schedule;
-    let last = job.last_run_at;
+    is_due_schedule(&job.schedule, job.last_run_at, now)
+}
 
+fn is_due_schedule(sched: &crate::model::Schedule, last: Option<chrono::DateTime<Utc>>, now: &chrono::DateTime<Utc>) -> bool {
     if let Some(hours) = sched.every_hours {
         let due = match last {
             None => true,
@@ -126,6 +145,45 @@ pub fn execute_job(state: Arc<AppState>, job_id: &str) -> Option<crate::sync_eng
             message: outcome.message.clone(),
         });
         // keep log growth bounded
+        let len = store.logs.len();
+        if len > 500 {
+            store.logs.drain(0..len - 500);
+        }
+    }
+    state.save();
+    Some(outcome)
+}
+
+/// フォルダ同期ジョブ(gitホスティング非依存、`folder_sync`参照)の
+/// 実行。`execute_job`と同じ構造(取得→実行→結果を反映→ログ追記→保存)を
+/// 踏襲する。
+pub fn execute_folder_job(state: Arc<AppState>, job_id: &str) -> Option<crate::folder_sync::FolderRunOutcome> {
+    let (mut job, source, dest) = {
+        let store = state.store.lock().unwrap();
+        let job = store.folder_jobs.iter().find(|j| j.id == job_id)?.clone();
+        let source = store.folder_endpoints.iter().find(|e| e.id == job.source_endpoint_id)?.clone();
+        let dest = store.folder_endpoints.iter().find(|e| e.id == job.dest_endpoint_id)?.clone();
+        (job, source, dest)
+    };
+
+    let started_at = Utc::now();
+    let outcome = crate::folder_sync::run_folder_sync(&source, &dest);
+    job.last_run_at = Some(Utc::now());
+    job.last_run_status = Some(if outcome.success { "ok".to_string() } else { "error".to_string() });
+
+    {
+        let mut store = state.store.lock().unwrap();
+        if let Some(slot) = store.folder_jobs.iter_mut().find(|j| j.id == job_id) {
+            *slot = job.clone();
+        }
+        store.logs.push(RunLogEntry {
+            id: crate::model::new_id(),
+            job_id: job_id.to_string(),
+            started_at,
+            finished_at: Some(Utc::now()),
+            success: outcome.success,
+            message: outcome.message.clone(),
+        });
         let len = store.logs.len();
         if len > 500 {
             store.logs.drain(0..len - 500);

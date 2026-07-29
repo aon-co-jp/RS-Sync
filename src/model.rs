@@ -95,6 +95,13 @@ pub struct Store {
     pub jobs: Vec<SyncJob>,
     #[serde(default)]
     pub logs: Vec<RunLogEntry>,
+    /// 2026-07-29追記: gitホスティングとは無関係の、レンタルサーバー/
+    /// VPS/ローカルドライブ/スマホ/NAS間のフォルダコピー同期
+    /// (`folder_sync`参照)。既存の`accounts`/`jobs`とは別の名前空間。
+    #[serde(default)]
+    pub folder_endpoints: Vec<crate::folder_sync::FolderEndpoint>,
+    #[serde(default)]
+    pub folder_jobs: Vec<crate::folder_sync::FolderSyncJob>,
 }
 
 pub struct AppState {

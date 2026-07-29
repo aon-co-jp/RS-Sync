@@ -239,6 +239,123 @@ fn list_logs(state: Data<&Arc<AppState>>) -> Json<Vec<model::RunLogEntry>> {
     Json(logs)
 }
 
+// ---------------- フォルダ同期(gitホスティング非依存、SFTP/ローカル) ----------------
+
+#[handler]
+fn list_folder_endpoints(state: Data<&Arc<AppState>>) -> Json<Vec<rs_sync::folder_sync::FolderEndpointView>> {
+    let store = state.store.lock().unwrap();
+    Json(store.folder_endpoints.iter().map(rs_sync::folder_sync::FolderEndpointView::from).collect())
+}
+
+#[handler]
+fn create_folder_endpoint(
+    state: Data<&Arc<AppState>>,
+    Json(mut ep): Json<rs_sync::folder_sync::FolderEndpoint>,
+) -> Json<rs_sync::folder_sync::FolderEndpointView> {
+    ep.id = model::new_id();
+    let view = rs_sync::folder_sync::FolderEndpointView::from(&ep);
+    {
+        let mut store = state.store.lock().unwrap();
+        store.folder_endpoints.push(ep);
+    }
+    state.save();
+    Json(view)
+}
+
+#[handler]
+fn delete_folder_endpoint(state: Data<&Arc<AppState>>, PPath(id): PPath<String>) -> Json<serde_json::Value> {
+    {
+        let mut store = state.store.lock().unwrap();
+        store.folder_endpoints.retain(|e| e.id != id);
+    }
+    state.save();
+    Json(serde_json::json!({"ok": true}))
+}
+
+#[derive(serde::Deserialize)]
+struct UpdateFolderEndpointCredentialsReq {
+    #[serde(default)]
+    password: String,
+    #[serde(default)]
+    private_key_path: String,
+}
+
+#[handler]
+fn update_folder_endpoint_credentials(
+    state: Data<&Arc<AppState>>,
+    PPath(id): PPath<String>,
+    Json(body): Json<UpdateFolderEndpointCredentialsReq>,
+) -> Response {
+    let mut store = state.store.lock().unwrap();
+    let Some(ep) = store.folder_endpoints.iter_mut().find(|e| e.id == id) else {
+        return error_response(StatusCode::NOT_FOUND, "folder endpoint not found");
+    };
+    ep.password = body.password;
+    ep.private_key_path = body.private_key_path;
+    let view = rs_sync::folder_sync::FolderEndpointView::from(&*ep);
+    drop(store);
+    state.save();
+    json_ok(&serde_json::to_value(view).unwrap())
+}
+
+#[handler]
+fn list_folder_jobs(state: Data<&Arc<AppState>>) -> Json<Vec<rs_sync::folder_sync::FolderSyncJob>> {
+    let store = state.store.lock().unwrap();
+    Json(store.folder_jobs.clone())
+}
+
+#[derive(serde::Deserialize)]
+struct NewFolderJobReq {
+    name: String,
+    source_endpoint_id: String,
+    dest_endpoint_id: String,
+    schedule: Schedule,
+}
+
+#[handler]
+fn create_folder_job(state: Data<&Arc<AppState>>, Json(req): Json<NewFolderJobReq>) -> Json<rs_sync::folder_sync::FolderSyncJob> {
+    let job = rs_sync::folder_sync::FolderSyncJob {
+        id: model::new_id(),
+        name: req.name,
+        source_endpoint_id: req.source_endpoint_id,
+        dest_endpoint_id: req.dest_endpoint_id,
+        repos: vec![],
+        schedule: req.schedule,
+        enabled: true,
+        last_run_at: None,
+        last_run_status: None,
+    };
+    {
+        let mut store = state.store.lock().unwrap();
+        store.folder_jobs.push(job.clone());
+    }
+    state.save();
+    Json(job)
+}
+
+#[handler]
+fn delete_folder_job(state: Data<&Arc<AppState>>, PPath(id): PPath<String>) -> Json<serde_json::Value> {
+    {
+        let mut store = state.store.lock().unwrap();
+        store.folder_jobs.retain(|j| j.id != id);
+    }
+    state.save();
+    Json(serde_json::json!({"ok": true}))
+}
+
+#[handler]
+async fn run_folder_job_now(state: Data<&Arc<AppState>>, PPath(id): PPath<String>) -> Json<serde_json::Value> {
+    // フォルダ同期はSFTP接続を含むブロッキングI/Oのため、既存のgit同期
+    // ジョブと同じ理由(2026-07-29のスケジューラ無言停止バグの教訓)で
+    // `spawn_blocking`経由で呼ぶ。
+    let state = state.clone();
+    let outcome = tokio::task::spawn_blocking(move || scheduler::execute_folder_job(state, &id)).await.unwrap_or(None);
+    match outcome {
+        Some(outcome) => Json(serde_json::json!({"success": outcome.success, "message": outcome.message})),
+        None => Json(serde_json::json!({"success": false, "message": "job or endpoints not found"})),
+    }
+}
+
 #[handler]
 fn index() -> poem::web::Html<&'static str> {
     poem::web::Html(include_str!("../static/index.html"))
@@ -357,6 +474,11 @@ fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::End
         .at("/jobs/:id/run", post(run_job_now))
         .at("/jobs/:id/resolve/:repo", post(resolve_conflict))
         .at("/logs", get(list_logs))
+        .at("/folder-endpoints", get(list_folder_endpoints).post(create_folder_endpoint))
+        .at("/folder-endpoints/:id", poem::delete(delete_folder_endpoint).put(update_folder_endpoint_credentials))
+        .at("/folder-jobs", get(list_folder_jobs).post(create_folder_job))
+        .at("/folder-jobs/:id", poem::delete(delete_folder_job))
+        .at("/folder-jobs/:id/run", post(run_folder_job_now))
         .with(RequireAuth { auth_state: auth_state.clone() });
 
     Route::new()
@@ -517,6 +639,44 @@ mod tests {
             .send()
             .await;
         missing_resp.assert_status(StatusCode::NOT_FOUND);
+    }
+
+    /// 2026-07-29追記(ユーザー指示「レンタルサーバーやVPSやローカル
+    /// ドライブやスマホやNASドライブなど同士でCOPYして同期を取れる
+    /// システムも搭載して」): フォルダ同期の接続先(パスワード含む)を
+    /// 作成すると、レスポンスに生パスワードが含まれず`credentials_set`
+    /// のみが返ることを確認する(既存のトークン非公開パターンを踏襲)。
+    #[tokio::test]
+    async fn folder_endpoint_create_and_list_never_expose_raw_password() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, auth_state) = make_state(&tmp, true);
+        let token = auth_state.auth.create_session("admin@example.com");
+        let app = build_app(state, auth_state);
+        let client = TestClient::new(app);
+
+        let create_resp = client
+            .post("/api/folder-endpoints")
+            .header("Authorization", format!("Bearer {token}"))
+            .body_json(&serde_json::json!({
+                "id":"", "name":"nas", "kind":"Sftp", "path":"/backups",
+                "host":"203.0.113.10", "port":22, "username":"root",
+                "password":"super-secret-password", "private_key_path":""
+            }))
+            .send()
+            .await;
+        create_resp.assert_status_is_ok();
+        let created_body = create_resp.0.into_body().into_string().await.unwrap();
+        assert!(!created_body.contains("super-secret-password"), "raw password leaked: {created_body}");
+
+        let list_resp = client.get("/api/folder-endpoints").header("Authorization", format!("Bearer {token}")).send().await;
+        list_resp.assert_status_is_ok();
+        let list_body = list_resp.0.into_body().into_string().await.unwrap();
+        assert!(!list_body.contains("super-secret-password"), "raw password leaked in list: {list_body}");
+        assert!(list_body.contains("\"credentials_set\":true"));
+
+        // 未ログインでは401。
+        let unauth = client.get("/api/folder-endpoints").send().await;
+        unauth.assert_status(StatusCode::UNAUTHORIZED);
     }
 
     /// 2026-07-29追記: `GET /healthz/scheduler`が、直近のtickが新しければ

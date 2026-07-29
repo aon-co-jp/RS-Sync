@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod folder_sync;
 pub mod mail;
 pub mod model;
 pub mod provider;
