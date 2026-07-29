@@ -62,6 +62,16 @@ fn build_and_send(config: &SmtpConfig, to: &str, subject: &str, body: String) ->
     Ok(())
 }
 
+/// 2026-07-29追記(ユーザー指示「同期を取り始める時とパスワードが
+/// 違ったり変わったりやトークン切れのタイミングでサイト上でもe-mailにも
+/// お知らせ機能を搭載して」): ジョブの開始・認証失敗を知らせる汎用通知
+/// メール。呼び出し元(`scheduler.rs`)は`tokio::task::spawn_blocking`の
+/// 内側(同期コンテキスト)で動くため、`send_otp`のような非同期ラッパーは
+/// 使わずここで直接同期送信する。
+pub fn send_notification_sync(config: &SmtpConfig, to: &str, subject: &str, body: String) -> Result<(), MailError> {
+    build_and_send(config, to, subject, body)
+}
+
 pub async fn send_otp(config: SmtpConfig, to: String, code: String) -> Result<(), MailError> {
     let body = format!(
         "RS-Sync ログイン用ワンタイムパスワード / RS-Sync login one-time password\n\n\

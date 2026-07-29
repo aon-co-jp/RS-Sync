@@ -612,6 +612,8 @@ mod tests {
             git_base: "https://github.com".to_string(),
             owner: "aon-co-jp".to_string(),
             token: token.to_string(),
+            token_expires_at: None,
+            expiry_warning_sent: false,
         }
     }
 

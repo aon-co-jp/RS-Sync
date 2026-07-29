@@ -42,6 +42,17 @@ pub struct Account {
     /// org/user namespace to operate under
     pub owner: String,
     pub token: String,
+    /// 2026-07-29追記(ユーザー指示「トークンはいつ切れますなども
+    /// サイト上でもe-mailにもお知らせ機能を搭載して」): トークンの
+    /// 有効期限(ユーザーが任意入力、GitHub等はトークン発行時に自分で
+    /// 期限を設定するため、こちらから自動取得はできない——正直な開示、
+    /// 入力してもらう前提の設計)。期限の7日前を切ると通知メールを送る。
+    #[serde(default)]
+    pub token_expires_at: Option<DateTime<Utc>>,
+    /// 期限切れ間近の通知を送信済みかどうか(同じ期限に対して何度も
+    /// メールを送らないためのフラグ、トークン更新時にリセットされる)。
+    #[serde(default)]
+    pub expiry_warning_sent: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -116,6 +127,13 @@ pub struct AppState {
     /// はず——`GET /healthz`にこの値を含め、一定時間(3分)更新が無ければ
     /// 異常とみなす。
     pub scheduler_last_tick: Mutex<DateTime<Utc>>,
+    /// 2026-07-29追記(ユーザー指示「同期を取り始める時とパスワードや
+    /// トークン切れのタイミングでサイト上でもe-mailにもお知らせ機能を
+    /// 搭載して」): 通知メールの送信先・SMTP設定。`AuthState`側の
+    /// SMTP設定と同じ環境変数から読む(スケジューラは`AuthState`を
+    /// 持たないため、`AppState`側にも同じ設定を複製して持つ)。
+    pub notify_email: Option<String>,
+    pub smtp: Option<crate::mail::SmtpConfig>,
 }
 
 impl AppState {
@@ -130,6 +148,8 @@ impl AppState {
             store: Mutex::new(store),
             data_file: data_file.to_string(),
             scheduler_last_tick: Mutex::new(Utc::now()),
+            notify_email: std::env::var("RS_SYNC_ADMIN_EMAIL").ok().filter(|s| !s.is_empty()),
+            smtp: crate::mail::SmtpConfig::from_env(),
         }
     }
 

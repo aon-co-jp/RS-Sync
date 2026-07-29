@@ -69,6 +69,7 @@ struct AccountView {
     owner: String,
     /// 実トークンの代わりに、設定済みかどうかのみを返す。
     token_set: bool,
+    token_expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl From<&Account> for AccountView {
@@ -81,6 +82,7 @@ impl From<&Account> for AccountView {
             git_base: a.git_base.clone(),
             owner: a.owner.clone(),
             token_set: !a.token.is_empty(),
+            token_expires_at: a.token_expires_at,
         }
     }
 }
@@ -124,6 +126,11 @@ fn delete_account(state: Data<&Arc<AppState>>, PPath(id): PPath<String>) -> Json
 #[derive(serde::Deserialize)]
 struct UpdateAccountTokenReq {
     token: String,
+    /// 2026-07-29追記: トークンの有効期限(任意、ISO8601)。GitHub等は
+    /// トークン発行時にユーザー自身が期限を選ぶため、この値も自動取得は
+    /// できず入力してもらう前提。
+    #[serde(default)]
+    token_expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[handler]
@@ -137,6 +144,10 @@ fn update_account_token(
         return error_response(StatusCode::NOT_FOUND, "account not found");
     };
     acc.token = body.token;
+    acc.token_expires_at = body.token_expires_at;
+    // トークンを更新したら、古い期限に対する警告済みフラグをリセットする
+    // (新しいトークン/新しい期限に対して、また期限が近づいたら通知すべきため)。
+    acc.expiry_warning_sent = false;
     let view = AccountView::from(&*acc);
     drop(store);
     state.save();

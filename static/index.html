@@ -303,6 +303,7 @@ const dict = {
    accTokenLabel:"トークン(このアカウントへのアクセス権を持つAPIトークン)", accTokenHint:"GitHubならfine-grained personal access token(repoスコープ)。ここに入力した値は一覧に再表示されません。",
    tokenCol:"トークン", tokenSet:"設定済み", tokenNotSet:"未設定(匿名アクセス、レート制限に注意)",
    updateToken:"トークンを更新", tokenUpdated:"更新しました",
+   tokenExpiresLabel:"有効期限", tokenExpiresInputLabel:"有効期限(任意、7日前に通知メールを送ります)",
    save:"保存",
    jobsH:"同期ジョブ", jobsHint:"上で登録したアカウント同士の間で、どのリポジトリを・どちらの向きに・どのタイミングで同期するかを設定します。",
    addJob:"ジョブを追加", jobNameLabel:"ジョブ名(自分が分かればどんな名前でも可)",
@@ -345,6 +346,7 @@ const dict = {
    accTokenLabel:"Token (an API token with access to this account)", accTokenHint:"For GitHub, a fine-grained personal access token (repo scope). What you type here is never shown back in the list.",
    tokenCol:"Token", tokenSet:"Set", tokenNotSet:"Not set (anonymous access, mind the rate limit)",
    updateToken:"Update token", tokenUpdated:"Updated",
+   tokenExpiresLabel:"Expires", tokenExpiresInputLabel:"Expiry date (optional, sends a warning email 7 days before)",
    save:"Save",
    jobsH:"Sync jobs", jobsHint:"Between the accounts registered above, configure which repos, in which direction, and on what schedule to sync.",
    addJob:"Add job", jobNameLabel:"Job name (anything you'll recognize)",
@@ -456,15 +458,18 @@ async function renderAccounts(){
       const tokenBadge = a.token_set
         ? `<span class="pill ok">${dict[lang].tokenSet}</span>`
         : `<span class="pill err">${dict[lang].tokenNotSet}</span>`;
+      const expiryText = a.token_expires_at ? new Date(a.token_expires_at).toLocaleDateString() : "-";
       return `<tr>
         <td>${a.name}</td><td>${a.provider}</td><td>${a.owner}</td>
-        <td>${tokenBadge}</td>
+        <td>${tokenBadge}<div class="hint">${dict[lang].tokenExpiresLabel}: ${expiryText}</div></td>
         <td>
           <button onclick="delAcc('${a.id}')">${dict[lang].del}</button>
           <details style="display:inline-block">
             <summary style="display:inline">${dict[lang].updateToken}</summary>
             <div>
               <input type="password" id="tok-${a.id}" placeholder="ghp_...">
+              <label class="hint" for="tok-exp-${a.id}">${dict[lang].tokenExpiresInputLabel}</label>
+              <input type="date" id="tok-exp-${a.id}">
               <button onclick="updateAccountToken('${a.id}')">${dict[lang].save}</button>
               <span id="tok-result-${a.id}" class="hint"></span>
             </div>
@@ -481,10 +486,13 @@ async function renderAccounts(){
 
 async function updateAccountToken(id){
   const input = document.getElementById("tok-"+id);
+  const expInput = document.getElementById("tok-exp-"+id);
   const resultEl = document.getElementById("tok-result-"+id);
   try {
-    await api("api/accounts/"+id, {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({token: input.value})});
+    const expiresAt = expInput.value ? new Date(expInput.value + "T00:00:00Z").toISOString() : null;
+    await api("api/accounts/"+id, {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({token: input.value, token_expires_at: expiresAt})});
     input.value = "";
+    expInput.value = "";
     resultEl.textContent = dict[lang].tokenUpdated;
     renderAll();
   } catch(e) {
