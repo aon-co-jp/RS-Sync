@@ -84,6 +84,13 @@ fn http_client() -> reqwest::blocking::Client {
 /// a real quick-setup job that failed with "repo discovery failed: GitHub
 /// list_repos failed: 401 Unauthorized" despite the account being valid
 /// for anonymous/public access.
+/// `git_base`がSSH形式(`git@host`または`ssh://...`)かどうかを判定する。
+/// SSH形式が指定された場合、実際のgit clone/pushはVPS上の既存SSH鍵
+/// (`~/.ssh/`)を使い、トークンは一切使わない(2026-07-29追記)。
+fn is_ssh_git_base(git_base: &str) -> bool {
+    git_base.starts_with("git@") || git_base.starts_with("ssh://")
+}
+
 fn maybe_auth_header(
     req: reqwest::blocking::RequestBuilder,
     header_name: &str,
@@ -166,6 +173,23 @@ impl Provider for GitHubProvider {
         if resp.status().is_success() {
             return Ok(());
         }
+        // 2026-07-29追記: GitHubはリポジトリ作成に必ず認証を要求する
+        // (匿名では絶対に成功しない仕様上の制約)。トークンが無い場合は
+        // 失敗確定の作成APIを2回叩いてAPIレート制限を無駄に消費するのを
+        // 避け、早期に分かりやすいエラーで終わらせる——SSH鍵は git
+        // transport(clone/push)の認証はできてもリポジトリ「作成」の
+        // ようなREST API操作は代替できない、というGitHub側の仕様に
+        // 起因する回避不可能な制約。
+        if account.token.is_empty() {
+            return Err(anyhow!(
+                "GitHub ensure_repo: repo '{repo}' does not exist at {}/{} and cannot be \
+                 created without a token (GitHub's REST API requires authentication for repo \
+                 creation regardless of SSH key configuration — create it manually first, or \
+                 set a token on this account)",
+                account.owner,
+                repo
+            ));
+        }
         let create_url = format!(
             "{}/orgs/{}/repos",
             account.api_base.trim_end_matches('/'),
@@ -193,6 +217,19 @@ impl Provider for GitHubProvider {
     }
 
     fn remote_url(&self, account: &Account, repo: &str) -> String {
+        // 2026-07-29追記(ユーザー指示「トークンは辞めてSSHにしましょう」):
+        // `git_base`が`git@`または`ssh://`で始まる場合はSSH経由の
+        // clone/pushとして扱う(`git@github.com:owner/repo.git`形式)。
+        // この場合、VPS上で`git`コマンドが使う既存のSSH鍵(`~/.ssh/`、
+        // GitHub側にデプロイキー/アカウントのSSH公開鍵として登録済みの
+        // もの)がそのまま使われ、トークンは一切関与しない——git転送は
+        // 完全にSSH化できる。ただし`list_repos`/`ensure_repo`(GitHubの
+        // REST API)はGitHubの仕様上SSH鍵では代替できずトークン必須のまま
+        // (回避不可、正直な開示)。
+        if is_ssh_git_base(&account.git_base) {
+            let host = account.git_base.trim_end_matches('/').trim_end_matches(':');
+            return format!("{}:{}/{}.git", host, account.owner, repo);
+        }
         // https://<token>@github.com/<owner>/<repo>.git — omit the
         // "<token>@" prefix entirely when the token is empty (anonymous
         // clone of a public repo); a literal empty username before `@`
@@ -577,6 +614,46 @@ mod tests {
         let provider = GitHubProvider;
         let url = provider.remote_url(&account(""), "myrepo");
         assert_eq!(url, "https://github.com/aon-co-jp/myrepo.git");
+    }
+
+    /// 2026-07-29追記(ユーザー指示「トークンは辞めてSSHにしましょう」):
+    /// `git_base`がSSH形式の場合、生成されるURLにトークンが一切
+    /// 含まれないことを確認する。
+    #[test]
+    fn github_remote_url_uses_ssh_when_git_base_is_ssh_style() {
+        let provider = GitHubProvider;
+        let mut acc = account("");
+        acc.git_base = "git@github.com".to_string();
+        let url = provider.remote_url(&acc, "myrepo");
+        assert_eq!(url, "git@github.com:aon-co-jp/myrepo.git");
+
+        // トークンが設定されていても、SSH形式のgit_baseならトークンは
+        // URLに一切登場しない(SSH鍵のみが使われる)。
+        let mut acc_with_token = account("should-never-appear");
+        acc_with_token.git_base = "git@github.com".to_string();
+        let url = provider.remote_url(&acc_with_token, "myrepo");
+        assert!(!url.contains("should-never-appear"));
+        assert_eq!(url, "git@github.com:aon-co-jp/myrepo.git");
+    }
+
+    #[test]
+    fn github_remote_url_uses_ssh_url_scheme_form() {
+        let provider = GitHubProvider;
+        let mut acc = account("");
+        acc.git_base = "ssh://git@github.com".to_string();
+        let url = provider.remote_url(&acc, "myrepo");
+        assert_eq!(url, "ssh://git@github.com:aon-co-jp/myrepo.git");
+    }
+
+    /// 2026-07-29追記: トークンが空の場合、`ensure_repo`が(失敗確定の)
+    /// 作成APIを叩かず早期に分かりやすいエラーを返すことを確認する
+    /// (実ネットワークは呼ばれない範囲のロジック確認)。
+    #[test]
+    fn is_ssh_git_base_detects_common_forms() {
+        assert!(is_ssh_git_base("git@github.com"));
+        assert!(is_ssh_git_base("ssh://git@github.com"));
+        assert!(!is_ssh_git_base("https://github.com"));
+        assert!(!is_ssh_git_base("github.com"));
     }
 
     #[test]

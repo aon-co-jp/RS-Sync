@@ -153,7 +153,7 @@ a{color:#5fb3ff}
 <input id="acc-api-base" name="api_base" placeholder="https://api.github.com" required>
 
 <label for="acc-git-base" data-i18n="accGitBaseLabel">git base URL(clone/pushで使うURL)</label>
-<p class="hint" data-i18n="accGitBaseHint">GitHubなら通常そのまま <code>https://github.com</code> でOK。</p>
+<p class="hint" data-i18n="accGitBaseHint">GitHubなら通常そのまま <code>https://github.com</code> でOK。<code>git@github.com</code>のようにSSH形式で指定すると、VPS上のSSH鍵を使ったclone/push(トークン不要)になります(ただしリポジトリ一覧取得・新規作成はGitHubの仕様上トークンが必要なままです)。</p>
 <input id="acc-git-base" name="git_base" placeholder="https://github.com" required>
 
 <label for="acc-owner" data-i18n="accOwnerLabel">owner / org(GitHubのユーザー名または組織名)</label>
@@ -229,7 +229,7 @@ const dict = {
    addAccount:"アカウントを追加",
    accNameLabel:"表示名(自分が分かればどんな名前でも可)", accProviderLabel:"プロバイダ",
    accApiBaseLabel:"API base URL(プロバイダのREST API入口)", accApiBaseHint:"GitHubなら通常そのまま https://api.github.com でOK。open-gitea等は自分でホストしているURL。",
-   accGitBaseLabel:"git base URL(clone/pushで使うURL)", accGitBaseHint:"GitHubなら通常そのまま https://github.com でOK。",
+   accGitBaseLabel:"git base URL(clone/pushで使うURL)", accGitBaseHint:"GitHubなら通常そのまま https://github.com でOK。git@github.comのようにSSH形式で指定すると、VPS上のSSH鍵を使ったclone/push(トークン不要)になります(ただしリポジトリ一覧取得・新規作成はGitHubの仕様上トークンが必要なままです)。",
    accOwnerLabel:"owner / org(GitHubのユーザー名または組織名)",
    accTokenLabel:"トークン(このアカウントへのアクセス権を持つAPIトークン)", accTokenHint:"GitHubならfine-grained personal access token(repoスコープ)。ここに入力した値は一覧に再表示されません。",
    tokenCol:"トークン", tokenSet:"設定済み", tokenNotSet:"未設定(匿名アクセス、レート制限に注意)",
@@ -261,7 +261,7 @@ const dict = {
    addAccount:"Add account",
    accNameLabel:"Display name (anything you'll recognize)", accProviderLabel:"Provider",
    accApiBaseLabel:"API base URL (the provider's REST API entry point)", accApiBaseHint:"For GitHub this is usually just https://api.github.com. For self-hosted providers, use your own URL.",
-   accGitBaseLabel:"git base URL (used for clone/push)", accGitBaseHint:"For GitHub this is usually just https://github.com.",
+   accGitBaseLabel:"git base URL (used for clone/push)", accGitBaseHint:"For GitHub this is usually just https://github.com. Use an SSH-style value like git@github.com to clone/push via the VPS's SSH key instead (no token needed for git transport — though listing/creating repos still requires a token per GitHub's API design).",
    accOwnerLabel:"Owner / org (your GitHub username or organization)",
    accTokenLabel:"Token (an API token with access to this account)", accTokenHint:"For GitHub, a fine-grained personal access token (repo scope). What you type here is never shown back in the list.",
    tokenCol:"Token", tokenSet:"Set", tokenNotSet:"Not set (anonymous access, mind the rate limit)",
