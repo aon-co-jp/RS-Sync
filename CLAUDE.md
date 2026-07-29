@@ -132,6 +132,32 @@ cargo test --test sync_integration -- --test-threads=1
     インストーラー・deb/msiパッケージング、(6)
     `/root/sync-repos.sh`のcronをRS-Syncへ最終的に一本化するかの判断。
 
+## HANDOFF追記(2026-07-29続き6) mail.rsへの単体テスト追加+`tests/sync_integration.rs`のビルド破損を発見・修正
+
+未着手・未完成項目の巡回開発の一環。
+
+1. **`mail.rs`にテストが1件も無かった問題に対応**: 実SMTP資格情報が
+   無い環境では`build_and_send`(実送信)自体は検証できないが、
+   メッセージ組み立てロジックを`build_message`として純粋関数に切り出し、
+   単体テスト5件を追加(正常系・`from`/`to`不正値での`MailError::Build`・
+   `MailError`のDisplay文言・`SmtpConfig::from_env`が必須環境変数欠如時
+   に`None`を返すこと)。
+2. **`tests/sync_integration.rs`が実際にビルドできなくなっていた実バグを
+   発見・修正**: 過去のパスで`Account`構造体に`token_expires_at`/
+   `expiry_warning_sent`フィールドが追加された際、この統合テストの
+   フィクスチャ(`make_account`)が追従しておらず、`cargo test --test
+   sync_integration`自体が`E0063`(フィールド不足)でコンパイルエラーに
+   なっていた(今回の変更とは無関係な既存バグ、この巡回で発見)。
+   フィールドを追加して修正、`cargo test --test sync_integration --
+   --test-threads=1`2件green(実git bareリポジトリでの一方向/双方向
+   同期を実際に検証)に復帰。
+3. **検証**: `cargo test --lib`29件全green(新規5件含む)、統合テスト
+   2件green、リグレッション無し。
+- 次にすべきこと: 前回HANDOFF(続き5)記載の(1)実SFTPサーバーでの実機
+  検証、(2)実トークン期限切れシナリオでの通知メール実地確認、は
+  いずれもユーザー操作(実サーバー・実受信確認)を要するため未着手の
+  まま。
+
 ## HANDOFF追記(2026-07-29続き5) フォルダ同期(SFTP)+通知機能(同期開始・認証エラー・トークン期限)+ハートビート横展開
 
 リミット接近のため簡潔に記録。
