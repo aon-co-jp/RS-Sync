@@ -27,7 +27,17 @@ pub async fn run_scheduler_loop(state: Arc<AppState>) {
         };
 
         for job_id in due_job_ids {
-            execute_job(state.clone(), &job_id);
+            // **Real bug fixed 2026-07-29**: `execute_job` does blocking
+            // network I/O (reqwest::blocking) and shells out to `git`.
+            // Calling it directly on this async loop's tokio worker thread
+            // blocked that thread until the call returned — and with no
+            // timeout on the HTTP client (also fixed today), a single slow
+            // GitHub response froze the scheduler forever, silently, with
+            // no further jobs ever running again. Route it through
+            // `spawn_blocking` so it always runs on tokio's dedicated
+            // blocking thread pool instead.
+            let state = state.clone();
+            tokio::task::spawn_blocking(move || execute_job(state, &job_id));
         }
     }
 }

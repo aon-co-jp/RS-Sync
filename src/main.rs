@@ -165,8 +165,17 @@ fn delete_job(state: Data<&Arc<AppState>>, PPath(id): PPath<String>) -> Json<ser
 }
 
 #[handler]
-fn run_job_now(state: Data<&Arc<AppState>>, PPath(id): PPath<String>) -> Json<serde_json::Value> {
-    match scheduler::execute_job(state.clone(), &id) {
+async fn run_job_now(state: Data<&Arc<AppState>>, PPath(id): PPath<String>) -> Json<serde_json::Value> {
+    // 2026-07-29追記: `execute_job`はブロッキングI/O(reqwest::blocking+
+    // `git`サブプロセス)を行うため、`spawn_blocking`経由で呼ぶ
+    // (scheduler.rs側の同種の修正と同じ理由——直接呼ぶとこのリクエストを
+    // 処理しているtokioワーカースレッドを、応答が返るまで丸ごと塞いで
+    // しまう)。
+    let state = state.clone();
+    let outcome = tokio::task::spawn_blocking(move || scheduler::execute_job(state, &id))
+        .await
+        .unwrap_or(None);
+    match outcome {
         Some(outcome) => Json(serde_json::json!({
             "success": outcome.success,
             "message": outcome.message,

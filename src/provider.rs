@@ -66,9 +66,19 @@ impl Provider for LocalProvider {
     }
 }
 
+/// **Real bug fixed 2026-07-29**: no timeout was configured, so a slow or
+/// hung response (e.g. GitHub delaying a response while abuse/secondary
+/// rate limiting is in effect) could block the calling thread forever.
+/// Since `execute_job`/`run_job` (which use this client) run on a tokio
+/// worker thread without `spawn_blocking`, a single hung request froze the
+/// entire scheduler loop permanently — no further scheduled jobs ran again
+/// after that point, with no error surfaced anywhere (discovered when a
+/// job stopped retrying entirely, mid-session, despite a 1-minute poll
+/// interval).
 fn http_client() -> reqwest::blocking::Client {
     reqwest::blocking::Client::builder()
         .user_agent("rs-sync/0.1")
+        .timeout(std::time::Duration::from_secs(30))
         .build()
         .expect("http client")
 }
