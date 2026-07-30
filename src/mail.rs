@@ -6,6 +6,7 @@
 //! [`open-redmine`]: https://github.com/aon-co-jp/open-redmine
 
 use lettre::message::header::ContentType;
+use lettre::message::{MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};
 
@@ -62,15 +63,66 @@ fn build_message(config: &SmtpConfig, to: &str, subject: &str, body: String) -> 
         .map_err(|e| MailError::Build(format!("{e}")))
 }
 
-fn build_and_send(config: &SmtpConfig, to: &str, subject: &str, body: String) -> Result<(), MailError> {
-    let email = build_message(config, to, subject, body)?;
-
+/// SMTP接続・送信のみを担う(メッセージの組み立て方式に依存しない)。
+/// `build_and_send`(プレーンテキスト)と`build_otp_message`
+/// (HTML+プレーンテキストのmultipart、2026-07-30追記)の両方から
+/// 共有される。
+fn send_message(config: &SmtpConfig, email: &Message) -> Result<(), MailError> {
     let creds = Credentials::new(config.username.clone(), config.password.clone());
     let mailer =
         SmtpTransport::starttls_relay(&config.host).map_err(|e| MailError::Send(format!("{e}")))?.port(config.port).credentials(creds).build();
 
-    mailer.send(&email).map_err(|e| MailError::Send(format!("{e}")))?;
+    mailer.send(email).map_err(|e| MailError::Send(format!("{e}")))?;
     Ok(())
+}
+
+fn build_and_send(config: &SmtpConfig, to: &str, subject: &str, body: String) -> Result<(), MailError> {
+    let email = build_message(config, to, subject, body)?;
+    send_message(config, &email)
+}
+
+/// OTPログインコードメール専用のメッセージ組み立て(2026-07-30追記、
+/// ユーザー指示「メールで届くワンタイムパスワードのメッセージの文字
+/// サイズはもっと二周り大きくして」への対応)。
+///
+/// 従来は`build_message`(プレーンテキストのみ)を共用していたため、
+/// コード自体の文字サイズを変える手段が無かった(プレーンテキストメール
+/// にはフォントサイズという概念が存在しない)。OTPメールだけは
+/// HTML+プレーンテキストの`multipart/alternative`にし、HTML側でコード
+/// 部分を大きな文字サイズ(本文の地の文が通常15px程度であるのに対し、
+/// コードは40px=約2.5倍、"二周り大きく"の要望に対応)で表示する。
+/// HTML非対応のメールクライアント向けに、従来通りのプレーンテキスト
+/// パートも必ず併記する(`multipart/alternative`はクライアント側が
+/// 対応する方を選ぶため、後方互換を損なわない)。
+fn build_otp_message(config: &SmtpConfig, to: &str, code: &str) -> Result<Message, MailError> {
+    let plain = format!(
+        "RS-Sync ログイン用ワンタイムパスワード / RS-Sync login one-time password\n\n\
+         コード / Code: {code}\n\n\
+         このコードは5分間有効です。 / This code is valid for 5 minutes.\n\n\
+         心当たりがない場合はこのメールを無視してください。 / If you did not request this, ignore this email."
+    );
+    let html = format!(
+        "<div style=\"font-family:system-ui,sans-serif;font-size:15px;color:#222;line-height:1.6\">\
+           <p>RS-Sync ログイン用ワンタイムパスワード / RS-Sync login one-time password</p>\
+           <p style=\"font-size:40px;font-weight:bold;letter-spacing:.15em;margin:1em 0;\
+                      background:#f0f0f0;padding:.3em .5em;display:inline-block;\
+                      border-radius:.3em\">{code}</p>\
+           <p>このコードは5分間有効です。 / This code is valid for 5 minutes.</p>\
+           <p style=\"color:#777\">心当たりがない場合はこのメールを無視してください。 / \
+              If you did not request this, ignore this email.</p>\
+         </div>"
+    );
+
+    Message::builder()
+        .from(config.from.parse().map_err(|e| MailError::Build(format!("{e}")))?)
+        .to(to.parse().map_err(|e| MailError::Build(format!("{e}")))?)
+        .subject("RS-Sync ログインコード / login code")
+        .multipart(
+            MultiPart::alternative()
+                .singlepart(SinglePart::builder().header(ContentType::TEXT_PLAIN).body(plain))
+                .singlepart(SinglePart::builder().header(ContentType::TEXT_HTML).body(html)),
+        )
+        .map_err(|e| MailError::Build(format!("{e}")))
 }
 
 /// 2026-07-29追記(ユーザー指示「同期を取り始める時とパスワードが
@@ -84,15 +136,12 @@ pub fn send_notification_sync(config: &SmtpConfig, to: &str, subject: &str, body
 }
 
 pub async fn send_otp(config: SmtpConfig, to: String, code: String) -> Result<(), MailError> {
-    let body = format!(
-        "RS-Sync ログイン用ワンタイムパスワード / RS-Sync login one-time password\n\n\
-         コード / Code: {code}\n\
-         このコードは5分間有効です。 / This code is valid for 5 minutes.\n\n\
-         心当たりがない場合はこのメールを無視してください。 / If you did not request this, ignore this email."
-    );
-    tokio::task::spawn_blocking(move || build_and_send(&config, &to, "RS-Sync ログインコード / login code", body))
-        .await
-        .map_err(|e| MailError::Send(format!("task panicked: {e}")))?
+    tokio::task::spawn_blocking(move || {
+        let email = build_otp_message(&config, &to, &code)?;
+        send_message(&config, &email)
+    })
+    .await
+    .map_err(|e| MailError::Send(format!("task panicked: {e}")))?
 }
 
 #[cfg(test)]
@@ -149,5 +198,27 @@ mod tests {
             std::env::remove_var(var);
         }
         assert!(SmtpConfig::from_env().is_none());
+    }
+
+    #[test]
+    fn build_otp_message_succeeds_and_contains_a_large_font_size_for_the_code() {
+        let config = sample_config();
+        let msg = build_otp_message(&config, "someone@example.test", "123456").expect("otp message should build");
+        let raw = String::from_utf8(msg.formatted()).expect("message bytes should be utf8");
+        assert!(raw.contains("multipart/alternative"), "OTP email must be multipart/alternative so plain-text clients still work: {raw}");
+        assert!(raw.contains("123456"), "the actual code must appear in the message: {raw}");
+        // 「二周り大きく」の要望: 地の文(15px想定)よりコード自体が
+        // 明確に大きい(40px)ことを、実際に組み立てたメッセージの中に
+        // そのCSSが含まれることで検証する。quoted-printableエンコード
+        // により長い行は"=\n"で折り返されるため、折り返され得る"px"
+        // までは厳密一致せず、数値部分までの一致で確認する。
+        assert!(raw.contains("font-size:40"), "the code must be rendered at a visibly larger font size than the ~15px body text: {raw}");
+    }
+
+    #[test]
+    fn build_otp_message_rejects_malformed_to_address() {
+        let config = sample_config();
+        let err = build_otp_message(&config, "not-an-email", "123456").unwrap_err();
+        assert!(matches!(err, MailError::Build(_)));
     }
 }

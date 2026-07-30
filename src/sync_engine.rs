@@ -117,8 +117,23 @@ fn mirror_fetch(cache: &PathBuf, remote_url: &str) -> Result<()> {
     Ok(())
 }
 
+/// **実バグ修正(2026-07-30、ユーザーの本番実行結果で判明)**: 従来
+/// `git push --mirror`をそのまま使っており、`mirror_fetch`が
+/// `+refs/*:refs/*`で取得した**GitHub自身が管理する`refs/pull/*`
+/// (プルリクエストの参照)まで送信先へpushしようとして、GitHub側の
+/// 「hidden refへの書き込み拒否」で毎回エラーになっていた
+/// (`refs/pull/*`はどのリポジトリでもGitHubが自動生成・管理する
+/// ものであり、そもそも外部から書き込めるものではない——バグという
+/// より、`--mirror`が意図せず対象外のrefまで含めてしまっていた設計上の
+/// 見落とし)。実際に同期すべきなのはブランチ(`refs/heads/*`)とタグ
+/// (`refs/tags/*`)のみのため、明示的にこの2つだけを対象にする
+/// (`--prune`で送信先にのみ存在する古いブランチ/タグの削除は維持、
+/// `--mirror`の「宛先を完全に同一化する」という目的自体は保つ)。
 fn mirror_push(cache: &PathBuf, remote_url: &str) -> Result<()> {
-    run_git(&["push", "--mirror", remote_url], Some(cache))?;
+    run_git(
+        &["push", "--prune", remote_url, "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"],
+        Some(cache),
+    )?;
     Ok(())
 }
 
