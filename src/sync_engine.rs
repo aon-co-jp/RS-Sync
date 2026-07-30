@@ -48,6 +48,43 @@ fn cache_dir(job_id: &str, repo: &str) -> PathBuf {
         .join(format!("{repo}.git"))
 }
 
+/// **重大な実セキュリティ障害の修正(2026-07-30、ユーザー実機報告で発覚)**:
+/// リモートURLに`https://<token>@github.com/...`の形でトークンを埋め込む
+/// 既存方式(`provider.rs`)自体は変更していないが、`run_git`が失敗時に
+/// `args`(トークン入りURLを含むコマンド引数そのもの)と`git`の標準
+/// エラー出力(こちらもリモートURLをそのままエコーする)を**無加工で
+/// エラーメッセージに含めていた**ため、同期ジョブが失敗するたびに、
+/// 実際のGitHub PAT等が本番UI(ジョブの実行結果メッセージ)へ平文で
+/// 表示されてしまっていた——ユーザーが実際に本番環境で踏んだ実障害。
+/// `redact_credentials`でリモートURL中の`scheme://user:pass@`/
+/// `scheme://token@`部分を`***`に置き換えてから返す。
+fn redact_credentials(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(scheme_pos) = rest.find("://") {
+        let (before_scheme, after_scheme_marker) = rest.split_at(scheme_pos);
+        let after_scheme = &after_scheme_marker[3..]; // skip "://"
+        out.push_str(before_scheme);
+        out.push_str("://");
+        // Credentials, if any, run from here up to the next '@' -- but only
+        // if that '@' appears before the next '/' (otherwise "@" belongs to
+        // the host/path, not a credential separator, and there is nothing to
+        // redact).
+        let boundary = after_scheme.find('/').unwrap_or(after_scheme.len());
+        match after_scheme[..boundary].find('@') {
+            Some(at_pos) => {
+                out.push_str("***@");
+                rest = &after_scheme[at_pos + 1..];
+            }
+            None => {
+                rest = after_scheme;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 fn run_git(args: &[&str], cwd: Option<&std::path::Path>) -> Result<String> {
     let mut cmd = Command::new("git");
     cmd.args(args);
@@ -56,11 +93,9 @@ fn run_git(args: &[&str], cwd: Option<&std::path::Path>) -> Result<String> {
     }
     let output = cmd.output()?;
     if !output.status.success() {
-        return Err(anyhow!(
-            "git {:?} failed: {}",
-            args,
-            String::from_utf8_lossy(&output.stderr)
-        ));
+        let redacted_args: Vec<String> = args.iter().map(|a| redact_credentials(a)).collect();
+        let redacted_stderr = redact_credentials(&String::from_utf8_lossy(&output.stderr));
+        return Err(anyhow!("git {:?} failed: {}", redacted_args, redacted_stderr));
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
@@ -225,5 +260,46 @@ pub fn run_job(job: &mut SyncJob, source: &Account, dest: &Account) -> RunOutcom
     RunOutcome {
         success: !any_failure,
         message: messages.join("\n"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redact_credentials_removes_embedded_token_from_https_url() {
+        let input = "git [\"push\", \"--mirror\", \"https://ghp_REDACTED0000000000000000000000000000@github.com/OpenRuno/aruaru-web.git\"] failed";
+        let redacted = redact_credentials(input);
+        assert!(!redacted.contains("ghp_REDACTED0000000000000000000000000000"), "token must not survive redaction: {redacted}");
+        assert!(redacted.contains("https://***@github.com/OpenRuno/aruaru-web.git"), "redacted form should keep the rest of the URL intact: {redacted}");
+    }
+
+    #[test]
+    fn redact_credentials_handles_multiple_urls_in_the_same_string() {
+        let input = "from https://tok1@github.com/a/b.git to https://tok2@github.com/c/d.git";
+        let redacted = redact_credentials(input);
+        assert!(!redacted.contains("tok1") && !redacted.contains("tok2"));
+        assert_eq!(redacted, "from https://***@github.com/a/b.git to https://***@github.com/c/d.git");
+    }
+
+    #[test]
+    fn redact_credentials_leaves_urls_without_credentials_unchanged() {
+        let input = "cloning https://github.com/aon-co-jp/rs-sync.git into /tmp/x";
+        assert_eq!(redact_credentials(input), input);
+    }
+
+    #[test]
+    fn redact_credentials_does_not_touch_at_signs_that_are_not_credential_separators() {
+        // An '@' appearing in the path (after the first '/') is not a
+        // credential separator and must be left alone.
+        let input = "see https://example.test/users/@handle for details";
+        assert_eq!(redact_credentials(input), input);
+    }
+
+    #[test]
+    fn redact_credentials_leaves_plain_text_without_urls_unchanged() {
+        let input = "no urls here at all";
+        assert_eq!(redact_credentials(input), input);
     }
 }

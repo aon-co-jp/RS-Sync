@@ -3,7 +3,7 @@ use rs_sync::mail::{self, SmtpConfig};
 use rs_sync::model::{self, Account, AppState, Direction, Schedule, SyncJob};
 use rs_sync::scheduler;
 use poem::{
-    get, handler, http::StatusCode, listener::TcpListener, post, web::{Data, Json, Path as PPath},
+    get, handler, http::Method, http::StatusCode, listener::TcpListener, post, web::{Data, Json, Path as PPath},
     Endpoint, EndpointExt, IntoResponse, Middleware, Request, Response, Result as PoemResult, Route, Server,
 };
 use serde::Serialize;
@@ -18,6 +18,14 @@ pub struct AuthState {
     pub admin_email: String,
     pub smtp: Option<SmtpConfig>,
     pub require_auth: bool,
+    /// 2026-07-30追記(ユーザー指示「このデモでは実際にはログインも
+    /// ログアウトも登録も保存も出来ないようにして」): デモ環境
+    /// (`RS_SYNC_READ_ONLY=true`)では、閲覧(GET)以外の全ての
+    /// `/api/*`リクエスト(ログイン/ログアウト自体を含む)を
+    /// サーバー側で拒否する。UIの見た目だけを制限するのではなく、
+    /// 直接APIを叩かれても実際に何も変更・保存できないことを保証する
+    /// のが目的。
+    pub read_only: bool,
 }
 
 #[handler]
@@ -476,6 +484,42 @@ impl<E: Endpoint> Endpoint for RequireAuthEndpoint<E> {
     }
 }
 
+/// `/api/`配下全体(認証系エンドポイント自身も含む)を対象に、
+/// `AuthState::read_only`が`true`のときGET以外の全メソッドを拒否する
+/// (2026-07-30追記)。`RequireAuth`より外側(先)に効かせることで、
+/// 「読み取り専用デモではログイン試行自体もサーバー側で意味を持たない」
+/// ことを保証する——`RequireAuth`は`require_auth=false`なら素通りする
+/// 設計のため、それだけでは書き込み系エンドポイントを止められない。
+struct ReadOnlyGuard {
+    read_only: bool,
+}
+
+impl<E: Endpoint> Middleware<E> for ReadOnlyGuard {
+    type Output = ReadOnlyGuardEndpoint<E>;
+    fn transform(&self, ep: E) -> Self::Output {
+        ReadOnlyGuardEndpoint { ep, read_only: self.read_only }
+    }
+}
+
+struct ReadOnlyGuardEndpoint<E> {
+    ep: E,
+    read_only: bool,
+}
+
+impl<E: Endpoint> Endpoint for ReadOnlyGuardEndpoint<E> {
+    type Output = Response;
+    async fn call(&self, req: Request) -> PoemResult<Self::Output> {
+        if self.read_only && req.method() != Method::GET {
+            return Ok(error_response(
+                StatusCode::FORBIDDEN,
+                "これは閲覧専用のデモ環境です。ログイン・登録・保存・実行はできません。 / \
+                 This is a read-only demo environment; login, registration, saving, and running jobs are all disabled.",
+            ));
+        }
+        self.ep.call(req).await.map(IntoResponse::into_response)
+    }
+}
+
 fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::Endpoint {
     let protected = Route::new()
         .at("/accounts", get(list_accounts).post(create_account))
@@ -492,14 +536,18 @@ fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::End
         .at("/folder-jobs/:id/run", post(run_folder_job_now))
         .with(RequireAuth { auth_state: auth_state.clone() });
 
+    let api = Route::new()
+        .at("/auth/request-otp", post(request_otp))
+        .at("/auth/verify-otp", post(verify_otp))
+        .at("/auth/logout", post(logout))
+        .nest("/", protected)
+        .with(ReadOnlyGuard { read_only: auth_state.read_only });
+
     Route::new()
         .at("/", get(index))
         .at("/healthz", get(healthz))
         .at("/healthz/scheduler", get(healthz_scheduler))
-        .at("/api/auth/request-otp", post(request_otp))
-        .at("/api/auth/verify-otp", post(verify_otp))
-        .at("/api/auth/logout", post(logout))
-        .nest("/api", protected)
+        .nest("/api", api)
         .data(state)
         .data(auth_state)
 }
@@ -511,11 +559,13 @@ async fn main() -> Result<(), std::io::Error> {
     let state = Arc::new(AppState::new(&data_file));
 
     let require_auth = std::env::var("RS_SYNC_REQUIRE_AUTH").map(|v| v != "false" && v != "0").unwrap_or(true);
+    let read_only = std::env::var("RS_SYNC_READ_ONLY").map(|v| v == "true" || v == "1").unwrap_or(false);
     let auth_state = Arc::new(AuthState {
         auth: AuthStore::default(),
         admin_email: std::env::var("RS_SYNC_ADMIN_EMAIL").unwrap_or_default(),
         smtp: SmtpConfig::from_env(),
         require_auth,
+        read_only,
     });
     if !require_auth {
         tracing::warn!(
@@ -534,7 +584,7 @@ async fn main() -> Result<(), std::io::Error> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(8095);
     let app = build_app(state, auth_state);
-    tracing::info!("rs-sync listening on 0.0.0.0:{port} (auth required: {require_auth})");
+    tracing::info!("rs-sync listening on 0.0.0.0:{port} (auth required: {require_auth}, read only: {read_only})");
     Server::new(TcpListener::bind(("0.0.0.0", port)))
         .run(app)
         .await
@@ -553,6 +603,7 @@ mod tests {
             admin_email: "admin@example.com".to_string(),
             smtp: None,
             require_auth,
+            read_only: false,
         });
         (state, auth_state)
     }
