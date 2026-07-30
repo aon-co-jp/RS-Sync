@@ -132,6 +132,58 @@ cargo test --test sync_integration -- --test-threads=1
     インストーラー・deb/msiパッケージング、(6)
     `/root/sync-repos.sh`のcronをRS-Syncへ最終的に一本化するかの判断。
 
+## HANDOFF追記(2026-07-29続き7) `sync_integration.rs`完成、双方向同期の実バグ2件を発見・修正・VPS本番反映
+
+ユーザー指示「sync_integration.rsを完成させて」への対応。ビルド破損の
+修正(続き6)だけでは不十分だったため、既存テストが実際にはカバーして
+いなかった双方向同期の2シナリオ(dest→source方向の変更伝播、両側変更時の
+コンフリクト検知)のテストを新規に書いたところ、**いずれも実際に失敗し、
+2件の本物のバグを発見した**——テストを書いたこと自体が実際に価値を
+生んだ実例。
+
+1. **`head_sha()`の実バグ(コンフリクト検知が実質機能していなかった)**:
+   `git rev-parse HEAD`をそのまま使っていたが、bareリポジトリの`HEAD`
+   symrefは`git init --bare`実行環境の`init.defaultBranch`(伝統的には
+   `master`)を指したままになりやすく、このコードベースが実際に
+   push/pullするブランチ(`main`)と一致しない場合、`git rev-parse HEAD`は
+   **エラーにならず(exit 0)、未解決の文字列`"HEAD"`をそのまま返す**
+   というgitの既知の挙動を踏んでいた。この結果、`src_sha`が常に
+   同じ固定文字列`"HEAD"`になり、`last_synced`との比較(変更検知・
+   コンフリクト検知の根幹)が事実上無意味になっていた——**2回以上
+   実行される双方向ジョブでは、コンフリクト検知機能そのものが
+   ずっと動いていなかった可能性がある**。dest側の比較では既に
+   `refs/heads/main`→`refs/heads/master`のフォールバックが実装
+   されていたが、src側の`head_sha()`には同じ配慮が無かったという
+   非対称なバグ。dest側と同じフォールバックパターンをsrc側にも適用し
+   修正。
+2. **dest→source方向の伝播が無言のno-opだった実バグ**: `dst_changed`
+   分岐が、`mirror_push(&cache, &src_url)`を呼ぶ前に**dest側の実際の
+   変更を`cache`へ取り込んでいなかった**。`cache`はループ冒頭の
+   `mirror_fetch(&cache, &src_url)`によって常にsource側の状態を
+   ミラーしたままであり、dest比較用の`refs/dest/*`名前空間への
+   フェッチは比較にしか使われず、実際にpushされる`cache`の通常の
+   refには一切反映されていなかった。そのため「distだけを変更→
+   同期実行」は**エラーも出さずに何も起きない**(sourceの古い状態を
+   source自身へpushし直すだけの実質no-op)という気づきにくい実障害
+   だった。`mirror_push`の直前に`mirror_fetch(&cache, &dst_url)`
+   (destを本当の意味でミラー取得し直す)を追加して修正。
+3. **新規テスト2件**(実git bareリポジトリでの実I/O、モック無し):
+   `two_way_sync_propagates_dest_only_change_back_to_source`・
+   `two_way_sync_detects_conflict_when_both_sides_diverge_and_then_skips_it`
+   (両側変更→`conflicted_repos`へ記録・force pushで上書きしない・
+   以後のrunでスキップされる、という安全性の核心を実証)。
+4. **検証・デプロイ**: `cargo test --lib`29件+
+   `cargo test --test sync_integration -- --test-threads=1`4件、
+   全green。VPS本番(`/root/rs-sync`)・デモ(`/root/rs-sync-demo`、
+   同一バイナリを共有)の両方へ`git pull`→`cargo build --release`→
+   `systemctl restart`まで実施し、`/healthz`が`ok`を返すことを確認。
+   この修正は既存の双方向同期ジョブの挙動に直接影響するため、本番
+   反映まで完了させた。
+- 次にすべきこと: 本番で実際に稼働中の双方向ジョブがあれば、次回の
+  実行タイミングで(コンフリクト検知が正しく働くようになったことで)
+  これまで見過ごされていた本物のコンフリクトが新たに検出される
+  可能性がある——挙動が変わったことをユーザーに周知しておくとよい。
+
 ## HANDOFF追記(2026-07-29続き6) mail.rsへの単体テスト追加+`tests/sync_integration.rs`のビルド破損を発見・修正
 
 未着手・未完成項目の巡回開発の一環。
