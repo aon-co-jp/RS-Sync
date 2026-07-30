@@ -87,9 +87,22 @@ fn mirror_push(cache: &PathBuf, remote_url: &str) -> Result<()> {
     Ok(())
 }
 
+/// The bare mirror's `HEAD` symref is only reliable if it happens to point at
+/// a branch that actually has commits. In practice a freshly `git init
+/// --bare`'d repo's `HEAD` defaults to whatever `init.defaultBranch` is
+/// configured on the machine that created it (historically `master`), which
+/// may not match the branch this codebase actually pushes to (`main`). When
+/// that happens, plain `git rev-parse HEAD` doesn't fail (exit code 0) --
+/// it just echoes the literal, unresolved string `"HEAD"` back, which then
+/// silently poisons every last-synced-sha comparison downstream (a real bug,
+/// found via `tests/sync_integration.rs`'s two-way conflict-detection test).
+/// Resolve explicitly against `refs/heads/main` first, falling back to
+/// `refs/heads/master`, mirroring the same fallback already used for the
+/// dest-side comparison a few lines below.
 fn head_sha(cache: &PathBuf) -> Result<String> {
-    let out = run_git(&["rev-parse", "HEAD"], Some(cache))?;
-    Ok(out.trim().to_string())
+    run_git(&["rev-parse", "refs/heads/main"], Some(cache))
+        .or_else(|_| run_git(&["rev-parse", "refs/heads/master"], Some(cache)))
+        .map(|s| s.trim().to_string())
 }
 
 pub fn resolve_repos(job: &SyncJob, source: &Account) -> Result<Vec<String>> {
@@ -177,6 +190,17 @@ pub fn run_job(job: &mut SyncJob, source: &Account, dest: &Account) -> RunOutcom
                         state.last_synced.insert(repo.clone(), src_sha.clone());
                         Ok(format!("{repo}: two-way source->dest ok ({src_sha})"))
                     } else if dst_changed {
+                        // `cache` currently mirrors *source*'s refs (from the
+                        // `mirror_fetch` above) -- the dest-only commits we
+                        // detected only exist under the throwaway
+                        // `refs/dest/*` namespace from the comparison fetch,
+                        // not on the cache's normal refs. Pushing `cache` as-is
+                        // to `src_url` would therefore be a silent no-op (it
+                        // would just push source's own unchanged state back to
+                        // itself). Re-fetch a real mirror of dest's refs into
+                        // the cache first so the subsequent push actually
+                        // carries dest's changes.
+                        mirror_fetch(&cache, &dst_url)?;
                         mirror_push(&cache, &src_url)?;
                         state.last_synced.insert(repo.clone(), dst_sha.clone());
                         Ok(format!("{repo}: two-way dest->source ok ({dst_sha})"))
