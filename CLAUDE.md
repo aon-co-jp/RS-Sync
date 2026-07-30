@@ -132,6 +132,43 @@ cargo test --test sync_integration -- --test-threads=1
     インストーラー・deb/msiパッケージング、(6)
     `/root/sync-repos.sh`のcronをRS-Syncへ最終的に一本化するかの判断。
 
+## HANDOFF追記(2026-07-30) デモ環境(認証不要)が実際には一切開けなかった実バグ2件を発見・修正・実機確認
+
+ユーザー指示「easy-web.tokyo/rs-sync などで実際に確認したい」に対応して
+実際にブラウザで開いたところ、`https://easy-web.tokyo/rs-sync/demo`
+(デモ、`RS_SYNC_REQUIRE_AUTH=false`のはず)が**ログイン画面から一切
+先に進めない**という実障害を発見した。
+
+1. **実バグ1: UIがサーバーの認証要否を一切見ていなかった**:
+   `syncAuthVisibility()`が`sessionToken()`(ローカルOTPトークン)の
+   有無だけでログイン画面の表示/非表示を判定しており、サーバー側API
+   (`GET api/accounts`)が実際にはトークン無しで200を返す(デモは
+   認証不要)場合でも、UIは常にログインフォームのまま止まっていた。
+   起動時にトークン無しで`api/accounts`を1回叩き、200が返れば
+   ログイン画面をスキップする`probeAuthRequirement()`を追加。
+2. **実バグ2(根本原因): 末尾スラッシュ無しパスでの相対API解決ミス**:
+   バグ1を直した直後、`https://easy-web.tokyo/rs-sync/demo`
+   (末尾スラッシュ**無し**)ではまだ直らず、`/rs-sync/demo/`
+   (末尾スラッシュ**あり**)でのみ直ることが実際のブラウザ検証で判明。
+   原因はブラウザの相対URL解決の標準仕様——`fetch("api/accounts")`が
+   末尾スラッシュ無しの`/rs-sync/demo`から解決されると、"demo"が
+   ファイル名扱いされ`/rs-sync/api/accounts`(本番、認証必須)に
+   誤解決されていた。`<head>`の最初(他のスクリプトが動く前)で、
+   末尾スラッシュが無ければ即座に補ってリダイレクトする処理を追加し
+   解消。
+3. **検証**: Claude Browser paneで実際に本番URL・デモURL(末尾スラッシュ
+   あり/なし両方)を開き、(a) 本番はOTPログイン画面のまま(想定通り)、
+   (b) デモは末尾スラッシュの有無に関わらず自動的にアプリ本体(クイック
+   設定・アカウント一覧・ジョブ一覧・フォルダ同期セクション+「これは
+   デモ環境で実トークンを入力しないでください」の警告文)まで到達する
+   ことを実際に確認した。VPS本番(`/root/rs-sync`、`rs-sync`/
+   `rs-sync-demo`両サービスが同じ`WorkingDirectory`を共有するため
+   1回のデプロイで両方に反映)へ`git pull`→`cargo build --release`→
+   両サービス`systemctl restart`まで実施済み。
+- 次にすべきこと: 特になし(この2件は完全に解消——ユーザーからの
+  「実際に確認したい」という要望が、修正後の実地検証まで含めて
+  達成された)。
+
 ## HANDOFF追記(2026-07-29続き7) `sync_integration.rs`完成、双方向同期の実バグ2件を発見・修正・VPS本番反映
 
 ユーザー指示「sync_integration.rsを完成させて」への対応。ビルド破損の
