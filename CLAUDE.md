@@ -132,6 +132,57 @@ cargo test --test sync_integration -- --test-threads=1
     インストーラー・deb/msiパッケージング、(6)
     `/root/sync-repos.sh`のcronをRS-Syncへ最終的に一本化するかの判断。
 
+## HANDOFF追記(2026-07-30続き) 【重大】トークン平文表示の実セキュリティ障害・デモの完全読み取り専用化・GitHubのhidden ref拒否エラー・OTPメールのフォントサイズ、計4件を対応
+
+ユーザーが本番環境(`https://easy-web.tokyo/rs-sync/`)を実際に操作した
+結果の画面出力から、**実際のGitHub PATが平文で本番UIに表示される
+セキュリティインシデント**を含む複数の実障害が発覚した。
+
+1. **【最優先・重大】同期ジョブ失敗時にトークンが平文表示される実障害**:
+   `run_git()`が失敗時、gitコマンドの引数(`https://<token>@github.com/...`
+   形式のリモートURL)と`git`の標準エラー出力(こちらもURLをそのまま
+   エコーする)を無加工でエラーメッセージに含めており、ユーザーが実際に
+   実行した同期ジョブの失敗ログに実GitHub PATがそのまま表示されていた
+   (このセッションのチャットにも実トークンが貼り付けられる結果と
+   なったため、**ユーザーには当該トークンをGitHub側で即座に失効させる
+   よう案内済み**)。`redact_credentials()`(単体テスト5件)を新設し、
+   `scheme://user:pass@`/`scheme://token@`形式の認証情報部分を`***`へ
+   置換してから返すよう修正。本番・デモ両方に影響する修正のため、
+   両サービスへ最優先でデプロイ・再起動した。
+2. **デモ環境の完全読み取り専用化**(ユーザー指示「このデモでは実際には
+   ログインもログアウトも登録も保存も出来ないようにして」): 新規
+   `AuthState::read_only`+`ReadOnlyGuard`ミドルウェアを追加。
+   `RS_SYNC_READ_ONLY=true`のとき、`/api/*`配下のGET以外の全リクエスト
+   (ログイン/ログアウト自体を含む)をサーバー側で403拒否する——UIの
+   見た目だけを制限するのではなく、直接APIを叩かれても実際に何も
+   変更・保存できないことを保証する設計。`rs-sync-demo.service`に
+   `Environment=RS_SYNC_READ_ONLY=true`を追加し、実際に
+   `curl -X POST .../demo/api/accounts`が403で拒否されることを確認済み。
+3. **`git push --mirror`がGitHubの「hidden ref」拒否で毎回失敗していた
+   実障害**: `--mirror`は`mirror_fetch`が`+refs/*:refs/*`で取得した
+   GitHub自身が管理する`refs/pull/*`(PR参照)まで送信先へpushしようと
+   しており、GitHub側は`deny updating a hidden ref`で必ず拒否していた
+   (ユーザーの本番実行結果で、多数のリポジトリがこのエラーで
+   FAILEDになっているのを確認)。`refs/heads/*`・`refs/tags/*`のみを
+   明示的に対象にする(`--prune`で宛先限定の古いブランチ/タグ削除は
+   維持)よう`mirror_push()`を修正——`refs/pull/*`はそもそも外部から
+   書き込めるものではなく、対象から除外するのが正しい設計。
+4. **OTPログインメールのフォントサイズ拡大**(ユーザー指示「文字サイズは
+   もっと二周り大きくして」): 従来プレーンテキストのみだった
+   `send_otp`を、HTML+プレーンテキストの`multipart/alternative`
+   (`build_otp_message`)へ変更。コード部分を地の文(15px想定)の
+   約2.5倍(40px・太字・背景色付き)で表示、HTML非対応クライアント
+   向けの従来通りのプレーンテキストも必ず併記。
+- **検証**: `cargo test --lib`36件全green(新規7件: redact_credentials
+  5件+build_otp_message 2件)、`cargo test --test sync_integration --
+  --test-threads=1`4件全green(mirror_push変更後も回帰無し)。VPS本番
+  (`rs-sync`・`rs-sync-demo`両サービス)へ`git pull`→
+  `cargo build --release`→`systemctl restart`まで実施、デモの
+  読み取り専用化・GET応答継続を実機確認済み。
+- 次にすべきこと: 特になし(今回報告された4件はすべて対応・デプロイ・
+  実機確認まで完了)。ユーザーには引き続き、チャットに貼り付けられた
+  GitHub PATの失効を強く推奨する。
+
 ## HANDOFF追記(2026-07-30) デモ環境(認証不要)が実際には一切開けなかった実バグ2件を発見・修正・実機確認
 
 ユーザー指示「easy-web.tokyo/rs-sync などで実際に確認したい」に対応して
