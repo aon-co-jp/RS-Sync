@@ -3,6 +3,26 @@
 <head>
 <meta charset="utf-8">
 <title>RS-Sync</title>
+<script>
+// 2026-07-30追記(実バグ修正): このアプリの全API呼び出しは相対パス
+// ("api/...")で書かれている(サブパス配下へマウントされても壊れない
+// ようにするための既存方針)。しかし相対パス解決はブラウザの標準
+// 仕様として、URLの末尾が"/"で終わっていない場合は最後のパス部分を
+// 「ファイル名」とみなして切り捨てる——例えば"/rs-sync/demo"
+// (末尾スラッシュ無し)から"api/accounts"を解決すると
+// "/rs-sync/api/accounts"(本番用、認証必須)になってしまい、
+// "/rs-sync/demo/api/accounts"(デモ用、認証不要)には届かない。
+// 末尾スラッシュ無しでアクセスされた場合は、他のスクリプトが一切
+// 動く前にこの場で"/"を補ってリダイレクトする(パス末尾に"."を含む
+// 実ファイル名を意図したアクセスは想定していないため、単純に
+// 「末尾が/でなければ/を足す」だけでよい)。
+(function(){
+  var p = location.pathname;
+  if (!p.endsWith("/")) {
+    location.replace(p + "/" + location.search + location.hash);
+  }
+})();
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 body{font-family:system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;background:#0b0e14;color:#e6e6e6}
