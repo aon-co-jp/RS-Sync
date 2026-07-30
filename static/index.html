@@ -385,11 +385,30 @@ function applyI18n(){
   });
   document.getElementById("langBtn").textContent = lang === "ja" ? "EN" : "JA";
 }
-document.getElementById("langBtn").onclick = ()=>{ lang = lang==="ja"?"en":"ja"; applyI18n(); if(sessionToken()) renderAll(); };
+document.getElementById("langBtn").onclick = ()=>{ lang = lang==="ja"?"en":"ja"; applyI18n(); if(sessionToken() || authNotRequired) renderAll(); };
 
 const TOKEN_KEY = "rssync_session_token";
 const EMAIL_KEY = "rssync_session_email";
 function sessionToken(){ return localStorage.getItem(TOKEN_KEY); }
+
+// 2026-07-30追記(実バグ修正): デモ環境(RS_SYNC_REQUIRE_AUTH=false)は
+// サーバー側APIが未ログインでも200を返すよう既に実装されていたが、
+// この画面側は`sessionToken()`(ローカルのOTPセッショントークン)の
+// 有無だけでログイン要否を判定していたため、「サーバーは認証不要な
+// のに画面は常にログインフォームで止まってしまい、デモを一切触れない」
+// という実障害があった(easy-web.tokyo/rs-sync/demoで実際に確認)。
+// 起動時に軽量なAPIを1回叩き、トークン無しで200が返ってくれば
+// (=サーバー自体が認証不要)ログイン画面をスキップする。
+let authNotRequired = false;
+async function probeAuthRequirement(){
+  if (sessionToken()) return; // 既にログイン済みなら判定不要
+  try {
+    const r = await fetch("api/accounts");
+    authNotRequired = r.ok;
+  } catch (e) {
+    authNotRequired = false;
+  }
+}
 
 async function api(path, opts){
   opts = opts || {};
@@ -407,7 +426,7 @@ async function api(path, opts){
 }
 
 function syncAuthVisibility(){
-  const loggedIn = !!sessionToken();
+  const loggedIn = !!sessionToken() || authNotRequired;
   document.getElementById("auth-logged-out").className = loggedIn ? "hidden" : "";
   document.getElementById("auth-logged-in").className = loggedIn ? "" : "hidden";
   document.getElementById("app-section").className = loggedIn ? "" : "hidden";
@@ -585,7 +604,7 @@ async function runFolderJob(id){ await api("api/folder-jobs/"+id+"/run", {method
 
 async function renderAll(){
   renderSchedulerHealth();
-  if (!sessionToken()) return;
+  if (!sessionToken() && !authNotRequired) return;
   try {
     const accs = await renderAccounts();
     await renderJobs(accs);
@@ -743,8 +762,10 @@ if (location.pathname.includes("/demo")) {
 }
 
 applyI18n();
-syncAuthVisibility();
-renderAll();
+probeAuthRequirement().then(()=>{
+  syncAuthVisibility();
+  renderAll();
+});
 </script>
 </body>
 </html>
