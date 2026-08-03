@@ -251,22 +251,25 @@ a{color:#5fb3ff}
 <select id="fe-kind" name="kind">
   <option value="Local" data-i18n="feKindLocal">ローカルドライブ(このサーバー自身)</option>
   <option value="Sftp" data-i18n="feKindSftp">SFTP(VPS・レンタルサーバー・NAS・スマホ)</option>
+  <option value="Smb" data-i18n="feKindSmb">SMB(WiFiルーターのUSB共有・市販NAS)</option>
 </select>
 
-<label for="fe-path" data-i18n="fePathLabel">パス(ローカルなら絶対パス、SFTPなら接続先のディレクトリ)</label>
+<label for="fe-path" data-i18n="fePathLabel">パス(ローカルなら絶対パス、SFTPなら接続先のディレクトリ、SMBなら共有内の相対パス・空欄で共有ルート)</label>
 <input id="fe-path" name="path" placeholder="例: /var/backups または C:\data">
 
 <div id="fe-sftp-fields">
-  <label for="fe-host" data-i18n="feHostLabel">ホスト名/IPアドレス(SFTPのみ)</label>
-  <input id="fe-host" name="host" placeholder="例: 203.0.113.10">
-  <label for="fe-port" data-i18n="fePortLabel">ポート(SFTPのみ、既定22)</label>
+  <label for="fe-host" data-i18n="feHostLabel">ホスト名/IPアドレス(SFTP/SMBのみ)</label>
+  <input id="fe-host" name="host" placeholder="例: 203.0.113.10 または 192.168.1.1(ルーター)">
+  <label for="fe-port" data-i18n="fePortLabel">ポート(SFTPは既定22、SMBは既定445)</label>
   <input id="fe-port" name="port" type="number" value="22">
-  <label for="fe-username" data-i18n="feUsernameLabel">ユーザー名(SFTPのみ)</label>
+  <label for="fe-username" data-i18n="feUsernameLabel">ユーザー名(SFTP/SMBのみ)</label>
   <input id="fe-username" name="username" placeholder="例: root">
-  <label for="fe-password" data-i18n="fePasswordLabel">パスワード(SFTPのみ、秘密鍵を使うなら空欄可)</label>
+  <label for="fe-password" data-i18n="fePasswordLabel">パスワード(SFTPは秘密鍵を使うなら空欄可、SMBは必須)</label>
   <input id="fe-password" name="password" type="password">
   <label for="fe-key" data-i18n="feKeyLabel">秘密鍵ファイルのパス(SFTPのみ、このサーバー上のパス。パスワードより優先)</label>
   <input id="fe-key" name="private_key_path" placeholder="例: /root/.ssh/id_ed25519">
+  <label for="fe-share" data-i18n="feShareLabel">共有名(SMBのみ。ルーター管理画面・NAS設定画面で確認、例: usb1_1)</label>
+  <input id="fe-share" name="share" placeholder="例: usb1_1">
 </div>
 
 <div><button type="submit" data-i18n="save">保存</button></div>
@@ -348,10 +351,12 @@ const dict = {
    folderHint:"gitリポジトリを前提としない、単純なフォルダ間のファイルコピー同期です。接続先はローカルドライブ(このサーバー自身のファイルシステム)、またはSFTP(VPS・レンタルサーバー・NAS・Termux等を入れたスマホ)を選べます。一方向コピーのみ(宛先に無い、またはサイズが違うファイルだけを転送)。",
    addFolderEndpoint:"接続先を追加", feNameLabel:"表示名", feKindLabel:"種類",
    feKindLocal:"ローカルドライブ(このサーバー自身)", feKindSftp:"SFTP(VPS・レンタルサーバー・NAS・スマホ)",
-   fePathLabel:"パス(ローカルなら絶対パス、SFTPなら接続先のディレクトリ)",
-   feHostLabel:"ホスト名/IPアドレス(SFTPのみ)", fePortLabel:"ポート(SFTPのみ、既定22)",
-   feUsernameLabel:"ユーザー名(SFTPのみ)", fePasswordLabel:"パスワード(SFTPのみ、秘密鍵を使うなら空欄可)",
+   feKindSmb:"SMB(WiFiルーターのUSB共有・市販NAS)",
+   fePathLabel:"パス(ローカルなら絶対パス、SFTPなら接続先のディレクトリ、SMBなら共有内の相対パス)",
+   feHostLabel:"ホスト名/IPアドレス(SFTP/SMBのみ)", fePortLabel:"ポート(SFTPは既定22、SMBは既定445)",
+   feUsernameLabel:"ユーザー名(SFTP/SMBのみ)", fePasswordLabel:"パスワード(SFTPは秘密鍵を使うなら空欄可、SMBは必須)",
    feKeyLabel:"秘密鍵ファイルのパス(SFTPのみ、このサーバー上のパス。パスワードより優先)",
+   feShareLabel:"共有名(SMBのみ、例: usb1_1)",
    folderJobsH:"フォルダ同期ジョブ", addFolderJob:"ジョブを追加"},
  en: {title:"RS-Sync — Git Repository Sync Tool", intro:"One-way backup or two-way sync of repositories across GitHub / open-gitea / Gitea / Gitbucket.",
    loginH:"Login", loginNote:"For security reasons, only the registered admin email can log in.",
@@ -391,10 +396,12 @@ const dict = {
    folderHint:"Plain folder-to-folder file copy sync, no git repository involved. Destinations can be a local drive (this server's own filesystem) or SFTP (VPS, rented servers, NAS, or a phone with an SFTP app like Termux). One-way copy only (transfers files missing from, or a different size than, the destination).",
    addFolderEndpoint:"Add endpoint", feNameLabel:"Display name", feKindLabel:"Kind",
    feKindLocal:"Local drive (this server itself)", feKindSftp:"SFTP (VPS, rented server, NAS, phone)",
-   fePathLabel:"Path (absolute path if local, remote directory if SFTP)",
-   feHostLabel:"Hostname/IP (SFTP only)", fePortLabel:"Port (SFTP only, default 22)",
-   feUsernameLabel:"Username (SFTP only)", fePasswordLabel:"Password (SFTP only, leave empty if using a private key)",
+   feKindSmb:"SMB (WiFi router USB share, off-the-shelf NAS)",
+   fePathLabel:"Path (absolute path if local, remote directory if SFTP, relative path within the share if SMB)",
+   feHostLabel:"Hostname/IP (SFTP/SMB only)", fePortLabel:"Port (SFTP default 22, SMB default 445)",
+   feUsernameLabel:"Username (SFTP/SMB only)", fePasswordLabel:"Password (SFTP: optional if using a private key; SMB: required)",
    feKeyLabel:"Private key file path (SFTP only, path on this server; takes priority over password)",
+   feShareLabel:"Share name (SMB only, e.g. usb1_1)",
    folderJobsH:"Folder sync jobs", addFolderJob:"Add job"}
 };
 let lang = "ja";
@@ -592,9 +599,10 @@ async function renderFolderEndpoints(){
   const eps = await api("api/folder-endpoints");
   document.getElementById("folder-endpoints").innerHTML = eps.length ? (`<table><tr><th>${dict[lang].source}</th><th>${dict[lang].feKindLabel}</th><th>Path</th><th>${dict[lang].tokenCol}</th><th></th></tr>` +
     eps.map(e=>{
-      const kindLabel = e.kind === "Sftp" ? dict[lang].feKindSftp : dict[lang].feKindLocal;
+      const kindLabel = e.kind === "Sftp" ? dict[lang].feKindSftp : (e.kind === "Smb" ? dict[lang].feKindSmb : dict[lang].feKindLocal);
       const credBadge = e.kind === "Local" ? "-" : (e.credentials_set ? `<span class="pill ok">${dict[lang].tokenSet}</span>` : `<span class="pill err">${dict[lang].tokenNotSet}</span>`);
-      return `<tr><td>${e.name}</td><td>${kindLabel}</td><td>${e.path}${e.kind==="Sftp" ? " ("+e.username+"@"+e.host+":"+e.port+")" : ""}</td><td>${credBadge}</td><td><button onclick="delFolderEndpoint('${e.id}')">${dict[lang].del}</button></td></tr>`;
+      const remoteDesc = e.kind==="Sftp" ? " ("+e.username+"@"+e.host+":"+e.port+")" : (e.kind==="Smb" ? " ("+e.username+"@"+e.host+":"+e.port+"/"+e.share+")" : "");
+      return `<tr><td>${e.name}</td><td>${kindLabel}</td><td>${e.path}${remoteDesc}</td><td>${credBadge}</td><td><button onclick="delFolderEndpoint('${e.id}')">${dict[lang].del}</button></td></tr>`;
     }).join("") + "</table>") : "<p>-</p>";
   const opts = eps.map(e=>`<option value="${e.id}">${e.name}</option>`).join("");
   document.getElementById("feSrcSel").innerHTML = opts;
@@ -670,8 +678,9 @@ document.getElementById("folderEndpointForm").onsubmit = async (e)=>{
   const f = new FormData(e.target);
   await api("api/folder-endpoints", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
     id:"", name:f.get("name"), kind:f.get("kind"), path:f.get("path"),
-    host:f.get("host")||"", port:f.get("port")?parseInt(f.get("port")):22,
-    username:f.get("username")||"", password:f.get("password")||"", private_key_path:f.get("private_key_path")||""
+    host:f.get("host")||"", port:f.get("port")?parseInt(f.get("port")):(f.get("kind")==="Smb"?445:22),
+    username:f.get("username")||"", password:f.get("password")||"", private_key_path:f.get("private_key_path")||"",
+    share:f.get("share")||""
   })});
   e.target.reset(); renderAll();
 };

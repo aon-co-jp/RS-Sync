@@ -56,6 +56,50 @@ cargo test --test sync_integration -- --test-threads=1
 
 (cwdをテスト内で変更するため`--test-threads=1`必須。)
 
+## HANDOFF追記(2026-08-03) フォルダ同期(SFTP)を実VPSで初検証、実バグ1件を発見・修正
+
+ユーザー指示「RSyncのVPSやレンタルサーバーのフォルダーやGithub...
+などの連携対応動作確認」の続き。これまで「実SFTPサーバーが無く未検証」
+と記載していたフォルダ同期(`folder_sync.rs`)を、実際にconoha VPS
+(SSH鍵認証、`~/.ssh/conoha-vps.pem`)へ接続して検証した。
+
+1. **発見した実バグ**: `SftpBackend`の`read_file`/`write_file`/`stat`が
+   `self.base.join(rel_path)`(`std::path::Path::join`)でリモートパスを
+   組み立てていたが、**Windows開発機では`Path::join`/`push`がホストOSの
+   セパレータ(バックスラッシュ)を挿入する**ため、既存の文字列が
+   `/`区切りでも、結合点だけ`\`が混入したパス(例:
+   `/root/dest\file.txt`)を生成していた。SFTPは常にUnix系のリモート
+   パスを期待するため、これがそのままリモートサーバーへ送られると
+   `no such file`(SFTP(2))で失敗する。ローカル↔ローカル同期
+   (`LocalBackend`)はネイティブOSパスのままでよいため影響を受けず、
+   これまでのテストで検出されなかった。
+2. **修正**: `join_unix_path()`ヘルパーを新設し、`SftpBackend`側の全ての
+   リモートパス組み立て(`read_file`/`write_file`/`stat`+親ディレクトリ
+   作成ループ)をこの関数経由に統一。ホストOSに関わらず常に`/`区切りの
+   文字列として結合してから`Path`化する。
+3. **実機検証(実測、モックではない)**: 新規`#[ignore]`テスト
+   `local_to_sftp_and_back_round_trips_against_a_real_vps`
+   (open-redmineのGitLab/Bitbucket実ネットワークテストと同じパターン、
+   `RS_SYNC_TEST_SFTP_*`環境変数で実VPSの接続情報を渡す)を追加し、
+   実際に(a) ローカル→VPS(SFTP書き込み)、(b) VPS→別のローカル
+   ディレクトリ(SFTP読み取り)の往復で内容が一致することを確認した。
+   **ハマった点(正直な開示)**: Git Bash(MSYS)環境で`/root/...`形式の
+   環境変数をそのまま渡すと、MSYSのパス自動変換機能が
+   `C:/Program Files/Git/root/...`のようなWindowsパスへ勝手に書き換えて
+   しまい、一見コードのバグのように見える別の失敗を引き起こした
+   (`MSYS_NO_PATHCONV=1`で回避、今回の本当のバグ〈上記1〉とは別の
+   テスト環境固有の罠として切り分けて記録)。`cargo test --lib`
+   36件全green(回帰無し)。
+4. **正直な開示・残る範囲**: (1) Gitea(OSS)・GitBucket・GitLab・
+   Bitbucketの各プロバイダは引き続き実サーバーが無く未検証のまま
+   (このリポジトリのスコープでは新規インフラ構築は行わない判断)。
+   (2) フォルダ同期の双方向マージ・差分転送(rsync的なブロック単位
+   転送)は引き続き対象外(モジュールdocの既存の正直な開示通り)。
+  - 次にすべきこと: (1) 実際のSFTP folder syncジョブをUI経由で作成し、
+    スケジューラ実行での実地確認(今回は`run_folder_sync()`を直接
+    呼ぶ形の検証、UI/スケジューラ経由のE2Eは未実施)、(2) 他の
+    プロバイダ(Gitea/GitBucket/GitLab/Bitbucket)の実サーバー確保。
+
 ## HANDOFF追記(2026-08-01) OpenGiteaプロバイダの実機再検証+空トークン時の実装統一(ユーザー指示「RSyncのVPSやレンタルサーバーのフォルダーやGithub、Gitbucket、Bitbucket、Gitlab、Gitea同士などの連携対応動作確認」)
 
 同時並行タスクとして、各プロバイダの実際の疎通状態を再点検した。

@@ -11,6 +11,13 @@
 //! 入れれば同じ仕組みで接続できる。ローカルドライブはファイルシステムへ
 //! 直接アクセスする(SFTP不要)。
 //!
+//! 2026-08-03追記(ユーザー指示「WiFiルーターに接続のUSBメモリーや
+//! 外付けHDDやNASなども対応」): 多くの家庭用WiFiルーター(バッファロー・
+//! NECアテルモ等)のUSBストレージ共有機能・市販NASの大半は、SSH/SFTPでは
+//! なく**SMB(Windowsファイル共有、CIFS)**でのみアクセス可能なため、
+//! `FolderEndpointKind::Smb`を追加した(`smb2`crate、Pure-Rustクライアント、
+//! `libsmbclient`等のネイティブ依存無し)。
+//!
 //! **正直な開示・スコープの限界**:
 //! - 一方向コピーのみ(双方向マージ・コンフリクト検知は行わない——
 //!   既存のgit同期ジョブとは異なり、フォルダ同期には「共通の祖先」という
@@ -20,19 +27,22 @@
 //!   変更されたファイルは毎回全体を転送する)。
 //! - SFTP↔SFTP(両方が遠隔)の場合、このサーバーが一旦メモリへ読み込んで
 //!   から書き込む中継方式のため、非常に大きなファイルはメモリを消費する。
-//! - `ssh2`はクライアント専用crateのため、この環境にはテスト用の実SFTP
-//!   サーバーが無く、SFTP接続そのものの実機検証はできていない
-//!   (ローカル↔ローカルの同期ロジックは実ファイルI/Oで検証済み)。
+//! - SFTPは実VPS(conoha)で実機検証済み(2026-08-03、下記テスト参照)。
+//! - **SMBは、この開発環境にWiFiルーター/NAS実機が無いため実機検証が
+//!   できていない**(`smb2`crateの公開APIどおりに実装したのみ)。次回、
+//!   実際のルーターUSBストレージ・NAS機器で接続確認を行うこと。
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FolderEndpointKind {
     Local,
     Sftp,
+    Smb,
 }
 
 /// フォルダ同期の接続先(gitホスティングの`Account`とは別概念——
@@ -42,16 +52,23 @@ pub struct FolderEndpoint {
     pub id: String,
     pub name: String,
     pub kind: FolderEndpointKind,
-    /// `Local`ならこのサーバー上の絶対パス。`Sftp`なら接続先の
-    /// リモートベースディレクトリ。
+    /// `Local`ならこのサーバー上の絶対パス。`Sftp`/`Smb`なら接続先の
+    /// リモートベースディレクトリ(`Smb`の場合は共有〈share〉内の相対パス、
+    /// 空文字列なら共有のルート)。
     pub path: String,
-    /// 以下は`kind == Sftp`のときのみ使用。
+    /// 以下は`kind == Sftp`/`Smb`のときのみ使用。
     pub host: String,
     pub port: u16,
     pub username: String,
     pub password: String,
-    /// 秘密鍵ファイルのパス(このサーバー上、`password`より優先)。
+    /// 秘密鍵ファイルのパス(このサーバー上、`password`より優先、
+    /// `Sftp`のみ——`Smb`はパスワード認証〈NTLMv2〉のみ対応)。
     pub private_key_path: String,
+    /// `kind == Smb`のときのみ使用: SMB共有名(例: ルーターのUSB共有なら
+    /// `"usb1_1"`等、機種依存のためユーザーがルーター管理画面で確認する
+    /// 必要がある)。`#[serde(default)]`で既存データとの後方互換を維持。
+    #[serde(default)]
+    pub share: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +96,7 @@ pub struct FolderEndpointView {
     pub host: String,
     pub port: u16,
     pub username: String,
+    pub share: String,
     pub credentials_set: bool,
 }
 
@@ -92,6 +110,7 @@ impl From<&FolderEndpoint> for FolderEndpointView {
             host: e.host.clone(),
             port: e.port,
             username: e.username.clone(),
+            share: e.share.clone(),
             credentials_set: !e.password.is_empty() || !e.private_key_path.is_empty(),
         }
     }
@@ -246,10 +265,123 @@ impl FolderBackend for SftpBackend {
     }
 }
 
+/// SMB2/3(WiFiルーターUSB共有・市販NAS向け)バックエンド。`smb2`crateは
+/// tokio非同期APIのみを提供するため、各接続ごとに専用の使い捨てtokio
+/// ランタイムを保持し(`open_raid_z_core`の`SftpBackupTarget`と同じ
+/// 「同期trait内で使い捨てランタイムをblock_on」パターン)、`FolderBackend`の
+/// 同期インターフェースへ変換する。クライアント・ツリーは`&mut self`を
+/// 要求するため`Mutex`で内部可変性を持たせる(`&self`の`FolderBackend`
+/// トレイトと整合させるため)。
+struct SmbBackend {
+    runtime: tokio::runtime::Runtime,
+    inner: Mutex<(smb2::SmbClient, smb2::Tree)>,
+    base: String,
+}
+
+impl SmbBackend {
+    fn connect(endpoint: &FolderEndpoint) -> Result<Self> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("build tokio runtime for SMB connection")?;
+        let addr = format!("{}:{}", endpoint.host, endpoint.port);
+        let (client, tree) = runtime.block_on(async {
+            let mut client = smb2::connect(&addr, &endpoint.username, &endpoint.password)
+                .await
+                .with_context(|| format!("SMB connect to {addr}"))?;
+            let tree = client
+                .connect_share(&endpoint.share)
+                .await
+                .with_context(|| format!("SMB connect to share {}", endpoint.share))?;
+            Ok::<_, anyhow::Error>((client, tree))
+        })?;
+        Ok(Self { runtime, inner: Mutex::new((client, tree)), base: endpoint.path.trim_matches('/').to_string() })
+    }
+
+    fn remote_path(&self, rel_path: &Path) -> String {
+        let rel = rel_path.to_string_lossy().replace('\\', "/");
+        if self.base.is_empty() {
+            rel
+        } else if rel.is_empty() {
+            self.base.clone()
+        } else {
+            format!("{}/{}", self.base, rel)
+        }
+    }
+
+    fn walk(&self, dir: &str, out: &mut Vec<FileMeta>) -> Result<()> {
+        let mut guard = self.inner.lock().unwrap();
+        let (client, tree) = &mut *guard;
+        let entries = self.runtime.block_on(client.list_directory(tree, dir))?;
+        drop(guard);
+        for entry in entries {
+            if entry.name == "." || entry.name == ".." {
+                continue;
+            }
+            let child_path = if dir.is_empty() { entry.name.clone() } else { format!("{dir}/{}", entry.name) };
+            if entry.is_directory {
+                self.walk(&child_path, out)?;
+            } else {
+                let rel = self.base.is_empty().then(|| child_path.clone()).unwrap_or_else(|| {
+                    child_path.strip_prefix(&format!("{}/", self.base)).unwrap_or(&child_path).to_string()
+                });
+                out.push(FileMeta { rel_path: PathBuf::from(rel), size: entry.size });
+            }
+        }
+        Ok(())
+    }
+}
+
+impl FolderBackend for SmbBackend {
+    fn list_files(&self) -> Result<Vec<FileMeta>> {
+        let mut out = Vec::new();
+        self.walk(&self.base, &mut out)?;
+        Ok(out)
+    }
+
+    fn read_file(&self, rel_path: &Path) -> Result<Vec<u8>> {
+        let path = self.remote_path(rel_path);
+        let mut guard = self.inner.lock().unwrap();
+        let (client, tree) = &mut *guard;
+        self.runtime.block_on(client.read_file(tree, &path)).with_context(|| format!("SMB read {path}"))
+    }
+
+    fn write_file(&self, rel_path: &Path, data: &[u8]) -> Result<()> {
+        let path = self.remote_path(rel_path);
+        let mut guard = self.inner.lock().unwrap();
+        let (client, tree) = &mut *guard;
+        self.runtime.block_on(async {
+            // 親ディレクトリを1階層ずつ作成(既存でもエラーを無視、SFTP版と
+            // 同じ`mkdir -p`相当パターン)。
+            let mut acc = String::new();
+            if let Some((parent, _)) = path.rsplit_once('/') {
+                for component in parent.split('/') {
+                    if component.is_empty() {
+                        continue;
+                    }
+                    acc = if acc.is_empty() { component.to_string() } else { format!("{acc}/{component}") };
+                    let _ = client.create_directory(tree, &acc).await;
+                }
+            }
+            client.write_file_pipelined(tree, &path, data).await
+        })
+        .with_context(|| format!("SMB write {path}"))?;
+        Ok(())
+    }
+
+    fn stat(&self, rel_path: &Path) -> Option<u64> {
+        let path = self.remote_path(rel_path);
+        let mut guard = self.inner.lock().unwrap();
+        let (client, tree) = &mut *guard;
+        self.runtime.block_on(client.stat(tree, &path)).ok().map(|info| info.size)
+    }
+}
+
 fn backend_for(endpoint: &FolderEndpoint) -> Result<Box<dyn FolderBackend>> {
     match endpoint.kind {
         FolderEndpointKind::Local => Ok(Box::new(LocalBackend { base: PathBuf::from(&endpoint.path) })),
         FolderEndpointKind::Sftp => Ok(Box::new(SftpBackend::connect(endpoint)?)),
+        FolderEndpointKind::Smb => Ok(Box::new(SmbBackend::connect(endpoint)?)),
     }
 }
 
@@ -300,6 +432,7 @@ mod tests {
             username: String::new(),
             password: String::new(),
             private_key_path: String::new(),
+            share: String::new(),
         }
     }
 
@@ -380,6 +513,7 @@ mod tests {
             username: username.clone(),
             password: String::new(),
             private_key_path: key_path.clone(),
+            share: String::new(),
         };
 
         // local -> remote(実SFTP書き込み)
