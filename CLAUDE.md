@@ -93,6 +93,53 @@ Androidスマホとタブレットも一緒に整備して、iPhoneは後回し�
     エミュレータでの起動確認、(4) これらのインストーラー整備を
     他リポジトリ(open-easy-web等)へも横展開するか判断。
 
+## HANDOFF追記(2026-08-03続き5) 別のWiFiルーター(TP-Link)でSMB実機検証成功+実バグ1件を発見・修正
+
+直前エントリでASUS RT-AC65U(SMB1専用)への接続に失敗した後、ユーザーが
+別のルーター(TP-Link AX6600 Wi-Fi 6、USBストレージ+Samba共有
+「TP-Share」)を用意してくれたため、そちらで再検証した。
+
+1. **接続・認証・共有一覧取得に成功**: `smb2::connect`→
+   `list_shares()`で実際にSMB 2.0.2でネゴシエートし、共有`G`を検出。
+   ASUS機がSMB1専用だったのとは異なり、TP-Link機はSMB2/3に対応して
+   おり、`smb2`crateと問題なく通信できることを確認した(=`SmbBackend`
+   実装自体は正しく、前回の失敗は特定ルーターのSMB1限定という個体差
+   だったことが裏付けられた)。
+2. **発見・修正した実バグ**: 共有ルート(既存の`.minidlna`/`.TPDLNA`
+   フォルダ含む)を一覧・読み取りしたところ、`.minidlna/files.db`
+   (77824バイト)の読み取りで
+   `file is 77824 bytes, larger than the server's 65536-byte
+   single-read limit; use read_file_pipelined for files this size`
+   というエラーが発生した。原因は`SmbBackend::read_file`が単発
+   (non-pipelined)の`read_file`を使っており、サーバーがネゴシエート
+   した最大読み取りサイズ(このルーターでは64KB)を超えるファイルを
+   一切読めなかったこと(`write_file`側は元々`write_file_pipelined`を
+   使用済みで、`read_file`側だけ対称性が崩れていた)。
+   `client.read_file_pipelined`へ変更して解消。
+3. **`SmbBackend`経由の実機テストを新規追加**: `run_folder_sync()`
+   (プロダクションコードと同じ経路)でlocal→remote(実SMB書き込み)→
+   remote→local(共有ルート全体、大きい既存ファイル含む一覧+読み取り)を
+   実施し、アップロードしたテストファイルの内容が正しく往復することを
+   確認した(`local_to_smb_and_back_round_trips_against_a_real_router`、
+   `#[ignore]`付き)。修正後、実際にこのテストがpassすることを確認
+   (修正前は`.minidlna/files.db`の読み取りで失敗していた)。
+4. **検証(実測)**: `cargo test --lib`36件全green(回帰無し)+実機
+   テスト2件(SFTP・SMB)を`--ignored`で個別実行しいずれもpass。
+   実機上に残ったテストファイル(`rs-sync-smb-realdevice-test.txt`・
+   `smb-roundtrip-<pid>.txt`)は検証用の一時スクリプトで削除済み
+   (実機を汚さないよう後片付け)。VPS本番(`rs-sync`・
+   `rs-sync-demo`)へも反映・再起動、両サービスとも`active`を確認。
+5. **正直な開示・結論**: 「WiFiルーターのUSB共有」と一括りにしても
+   機種によってSMB1専用/SMB2対応が分かれる(ASUS RT-AC65U vs TP-Link
+   AX6600の実例)。今回の`SmbBackend`(SMB2/3専用の`smb2`crateベース)は
+   **SMB2/3対応ルーター/NASでは実際に正しく動作する**ことを実機で
+   確認できたが、SMB1専用の旧いルーターは引き続きサポート対象外
+   (直前エントリの「次にすべきこと」に記載の設計判断は保留のまま)。
+  - 次にすべきこと: (1) SMB1対応の要否再検討(引き続き保留、直前
+    エントリ参照)、(2) Android実機検証(ネットワーク分離により保留中、
+    別環境での再挑戦を検討)、(3) 他のNAS/ルーター機種でのさらなる
+    実機検証(任意)。
+
 ## HANDOFF追記(2026-08-03続き4) 実機検証まとめ: Task Scheduler成功、Android実機はネットワーク分離で保留、SMBは実ルーターがSMB1のみ対応と判明
 
 ユーザーが実際に管理者権限のWindows PC・Android実機(FCNT WE2 Plus)・
