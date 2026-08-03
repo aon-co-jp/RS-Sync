@@ -1,0 +1,23 @@
+<resources>
+    <string name="app_name">RS-Sync</string>
+    <string name="app_name_powersave">RS-Sync (省電力)</string>
+    <string name="app_name_normal">RS-Sync (通常)</string>
+    <string name="app_name_alwayson">RS-Sync (常時電源)</string>
+
+    <string name="profile_select_title">電源プロファイルを選択</string>
+    <string name="profile_select_subtitle">端末の使い方に合わせて選んでください。あとで「プロファイル変更」からいつでも選び直せます。</string>
+
+    <string name="profile_power_save_button">🔋 省電力 モード</string>
+    <string name="profile_power_save_desc">スマホとして普段使いする端末向け。疎通確認のポーリング間隔を長くし、バックグラウンドでの常時稼働を避けます(Android標準の省電力[Doze]機能に逆らいません)。</string>
+
+    <string name="profile_normal_button">⚖️ 通常 モード</string>
+    <string name="profile_normal_desc">通常のスマホ利用と即応性を両立するバランス型(既定)。</string>
+
+    <string name="profile_always_on_button">🔌 常時電源接続 モード</string>
+    <string name="profile_always_on_desc">充電しっぱなしの監視専用端末向け。WakeLockでスリープを防ぎ、短間隔での疎通確認を優先します。</string>
+
+    <string name="change_profile_button">電源プロファイルを変更</string>
+    <string name="connect_button">接続 / 疎通確認</string>
+    <string name="open_browser_button">🌐 ブラウザで開く(アカウント登録・同期ジョブ管理)</string>
+    <string name="server_url_hint">RS-SyncのURL (例: https://easy-web.tokyo/rs-sync)</string>
+</resources>
