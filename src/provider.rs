@@ -277,10 +277,14 @@ impl Provider for OpenGiteaProvider {
     fn list_repos(&self, account: &Account) -> Result<Vec<String>> {
         let client = http_client();
         let url = format!("{}/api/repos", account.api_base.trim_end_matches('/'));
-        let resp = client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", account.token))
-            .send()?;
+        // 2026-08-01追記(実機検証で確認したGitHubプロバイダと同じ罠を
+        // 未然に防ぐ): 空トークンの場合は`Authorization`ヘッダー自体を
+        // 送らない。open-gitea自身は現状空Bearerでも200を返す実装だが
+        // (`https://easy-web.tokyo/open-gitea/api/repos`で実機確認済み)、
+        // GitHubで実際に踏んだ「空トークンでの匿名フォールバック拒否」を
+        // 前提にせず、常にこの安全側パターンへ揃えておく。
+        let req = maybe_auth_header(client.get(&url), "Authorization", &account.token, |t| format!("Bearer {t}"));
+        let resp = req.send()?;
         if !resp.status().is_success() {
             return Err(anyhow!("open-gitea list_repos failed: {}", resp.status()));
         }
@@ -295,10 +299,8 @@ impl Provider for OpenGiteaProvider {
             account.api_base.trim_end_matches('/'),
             repo
         );
-        let resp = client
-            .put(&url)
-            .header("Authorization", format!("Bearer {}", account.token))
-            .send()?;
+        let req = maybe_auth_header(client.put(&url), "Authorization", &account.token, |t| format!("Bearer {t}"));
+        let resp = req.send()?;
         // open-gitea returns success or "already exists" style responses; treat any
         // non-5xx as acceptable since this is best-effort per the docs above.
         if resp.status().is_server_error() {
