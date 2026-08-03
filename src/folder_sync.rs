@@ -146,6 +146,23 @@ impl FolderBackend for LocalBackend {
     }
 }
 
+/// SFTPは常にリモート(Unix系)側のパス区切り`/`を期待するが、`Path::join`/
+/// `Path::push`はホストOSのセパレータ(Windows開発機なら`\`)を挿入するため、
+/// Windows上で開発・テストする際に壊れたパス(例:
+/// `/root/dest\file.txt`)を生成し実SFTPサーバーへの書き込みが
+/// `no such file`で失敗する実バグがあった(2026-08-03、実VPSでの検証で発見)。
+/// 常に`/`区切りの文字列として手動結合してから`Path`化することで、
+/// ホストOSに関わらずリモート側のパスを正しく組み立てる。
+fn join_unix_path(base: &Path, rel: &Path) -> PathBuf {
+    let base_str = base.to_string_lossy().replace('\\', "/");
+    let rel_str = rel.to_string_lossy().replace('\\', "/");
+    if rel_str.is_empty() {
+        return PathBuf::from(base_str);
+    }
+    let base_trimmed = base_str.trim_end_matches('/');
+    PathBuf::from(format!("{base_trimmed}/{rel_str}"))
+}
+
 struct SftpBackend {
     sftp: ssh2::Sftp,
     base: PathBuf,
@@ -201,20 +218,21 @@ impl FolderBackend for SftpBackend {
     }
 
     fn read_file(&self, rel_path: &Path) -> Result<Vec<u8>> {
-        let mut file = self.sftp.open(&self.base.join(rel_path))?;
+        let mut file = self.sftp.open(&join_unix_path(&self.base, rel_path))?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
         Ok(buf)
     }
 
     fn write_file(&self, rel_path: &Path, data: &[u8]) -> Result<()> {
-        let dest = self.base.join(rel_path);
+        let dest = join_unix_path(&self.base, rel_path);
         // 親ディレクトリを1階層ずつ作成(既存でもエラーを無視、SFTPには
-        // `mkdir -p`相当が無いため)。
+        // `mkdir -p`相当が無いため)。`acc`も常に`/`区切りで組み立てる
+        // (`join_unix_path`と同じ理由、Windows開発機での実バグ修正済み)。
         let mut acc = self.base.clone();
         if let Some(parent) = dest.parent() {
             for component in parent.strip_prefix(&self.base).unwrap_or(parent).components() {
-                acc.push(component);
+                acc = join_unix_path(&acc, Path::new(&component));
                 let _ = self.sftp.mkdir(&acc, 0o755);
             }
         }
@@ -224,7 +242,7 @@ impl FolderBackend for SftpBackend {
     }
 
     fn stat(&self, rel_path: &Path) -> Option<u64> {
-        self.sftp.stat(&self.base.join(rel_path)).ok().and_then(|s| s.size)
+        self.sftp.stat(&join_unix_path(&self.base, rel_path)).ok().and_then(|s| s.size)
     }
 }
 
@@ -330,5 +348,52 @@ mod tests {
         // 存在しないソースは「0件」として成功扱い(WalkDirは存在しないルート
         // を単に空扱いする)——エラーで落ちないことが重要な契約。
         assert!(outcome.success, "{}", outcome.message);
+    }
+
+    /// 2026-08-03追記: 実VPS(SSH鍵認証)へのSFTPフォルダ同期を実際に検証する
+    /// テスト。これまで「この環境には実SFTPサーバーが無く未検証」だった
+    /// ギャップを埋める(モジュールdoc「正直な開示」参照)。`#[ignore]`付き
+    /// (open-redmineのGitLab/Bitbucket実ネットワークテストと同じパターン)、
+    /// 環境変数`RS_SYNC_TEST_SFTP_HOST`/`_PORT`/`_USER`/`_KEY_PATH`が
+    /// 全て設定されている場合のみ実行する。
+    /// `cargo test folder_sync:: -- --ignored --nocapture`で明示実行。
+    #[test]
+    #[ignore]
+    fn local_to_sftp_and_back_round_trips_against_a_real_vps() {
+        let host = std::env::var("RS_SYNC_TEST_SFTP_HOST").expect("RS_SYNC_TEST_SFTP_HOST not set");
+        let port: u16 = std::env::var("RS_SYNC_TEST_SFTP_PORT").unwrap_or_else(|_| "22".to_string()).parse().unwrap();
+        let username = std::env::var("RS_SYNC_TEST_SFTP_USER").expect("RS_SYNC_TEST_SFTP_USER not set");
+        let key_path = std::env::var("RS_SYNC_TEST_SFTP_KEY_PATH").expect("RS_SYNC_TEST_SFTP_KEY_PATH not set");
+        let remote_path = std::env::var("RS_SYNC_TEST_SFTP_REMOTE_PATH").expect("RS_SYNC_TEST_SFTP_REMOTE_PATH not set");
+
+        let local_dir = tempfile::tempdir().unwrap();
+        std::fs::write(local_dir.path().join("roundtrip.txt"), b"hello from rs-sync local-to-sftp test").unwrap();
+
+        let local = local_endpoint(local_dir.path());
+        let remote = FolderEndpoint {
+            id: "remote".to_string(),
+            name: "real-vps".to_string(),
+            kind: FolderEndpointKind::Sftp,
+            path: remote_path.clone(),
+            host: host.clone(),
+            port,
+            username: username.clone(),
+            password: String::new(),
+            private_key_path: key_path.clone(),
+        };
+
+        // local -> remote(実SFTP書き込み)
+        let up = run_folder_sync(&local, &remote);
+        assert!(up.success, "upload failed: {}", up.message);
+        assert!(up.message.contains("1 file(s) copied"), "{}", up.message);
+
+        // remote -> local(別ディレクトリ、実SFTP読み取り)を確認する
+        // ことで、実際にリモートへ書き込まれた内容を読み戻せることを検証する。
+        let download_dir = tempfile::tempdir().unwrap();
+        let local_download = local_endpoint(download_dir.path());
+        let down = run_folder_sync(&remote, &local_download);
+        assert!(down.success, "download failed: {}", down.message);
+        let content = std::fs::read(download_dir.path().join("roundtrip.txt")).unwrap();
+        assert_eq!(content, b"hello from rs-sync local-to-sftp test");
     }
 }
