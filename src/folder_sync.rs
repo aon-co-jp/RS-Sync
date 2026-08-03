@@ -340,10 +340,15 @@ impl FolderBackend for SmbBackend {
     }
 
     fn read_file(&self, rel_path: &Path) -> Result<Vec<u8>> {
+        // 2026-08-03実機検証で発見: `read_file`(単発読み取り)はサーバーの
+        // ネゴシエート済み最大読み取りサイズ(実機のTP-Linkルーターでは
+        // 64KB)を超えるファイルで失敗する。`read_file_pipelined`は複数
+        // リクエストに分割して読むため、この上限を超えられる
+        // (`write_file`側は元から`write_file_pipelined`を使用済み)。
         let path = self.remote_path(rel_path);
         let mut guard = self.inner.lock().unwrap();
         let (client, tree) = &mut *guard;
-        self.runtime.block_on(client.read_file(tree, &path)).with_context(|| format!("SMB read {path}"))
+        self.runtime.block_on(client.read_file_pipelined(tree, &path)).with_context(|| format!("SMB read {path}"))
     }
 
     fn write_file(&self, rel_path: &Path, data: &[u8]) -> Result<()> {
@@ -529,5 +534,58 @@ mod tests {
         assert!(down.success, "download failed: {}", down.message);
         let content = std::fs::read(download_dir.path().join("roundtrip.txt")).unwrap();
         assert_eq!(content, b"hello from rs-sync local-to-sftp test");
+    }
+
+    /// 2026-08-03追記: 実WiFiルーター(TP-Link AX6600、USBストレージ+
+    /// Samba共有)へのSMBフォルダ同期を実際に検証するテスト。同日発見の
+    /// 「ASUS RT-AC65UはSMB1専用でSMB2/3クライアントと非互換」という
+    /// ケースとは別に、**SMB2/3対応ルーターに対しては`SmbBackend`が
+    /// 実際に動作する**ことを実機で確認する(モジュールdoc「正直な開示」の
+    /// 「実ルーター/NAS実機は無く未検証」を、少なくとも1機種については
+    /// 解消)。`#[ignore]`付き、環境変数`RS_SYNC_TEST_SMB_HOST`/`_PORT`/
+    /// `_USER`/`_PASSWORD`/`_SHARE`が全て設定されている場合のみ実行する。
+    /// `cargo test folder_sync:: -- --ignored --nocapture`で明示実行。
+    #[test]
+    #[ignore]
+    fn local_to_smb_and_back_round_trips_against_a_real_router() {
+        let host = std::env::var("RS_SYNC_TEST_SMB_HOST").expect("RS_SYNC_TEST_SMB_HOST not set");
+        let port: u16 = std::env::var("RS_SYNC_TEST_SMB_PORT").unwrap_or_else(|_| "445".to_string()).parse().unwrap();
+        let username = std::env::var("RS_SYNC_TEST_SMB_USER").unwrap_or_default();
+        let password = std::env::var("RS_SYNC_TEST_SMB_PASSWORD").unwrap_or_default();
+        let share = std::env::var("RS_SYNC_TEST_SMB_SHARE").expect("RS_SYNC_TEST_SMB_SHARE not set");
+
+        // ファイル名にPIDを含める(実機上に前回実行の残骸が残っていても、
+        // 同名・同サイズによる「変更無しスキップ」判定に引っかからない
+        // ようにするため——実機テストは何度も再実行され得るため必要)。
+        let filename = format!("smb-roundtrip-{}.txt", std::process::id());
+        let local_dir = tempfile::tempdir().unwrap();
+        std::fs::write(local_dir.path().join(&filename), b"hello from rs-sync local-to-smb test").unwrap();
+
+        let local = local_endpoint(local_dir.path());
+        let remote = FolderEndpoint {
+            id: "remote".to_string(),
+            name: "real-router".to_string(),
+            kind: FolderEndpointKind::Smb,
+            path: String::new(),
+            host: host.clone(),
+            port,
+            username: username.clone(),
+            password: password.clone(),
+            private_key_path: String::new(),
+            share: share.clone(),
+        };
+
+        // local -> remote(実SMB書き込み)
+        let up = run_folder_sync(&local, &remote);
+        assert!(up.success, "upload failed: {}", up.message);
+        assert!(up.message.contains("1 file(s) copied"), "{}", up.message);
+
+        // remote -> local(別ディレクトリ、実SMB読み取り)
+        let download_dir = tempfile::tempdir().unwrap();
+        let local_download = local_endpoint(download_dir.path());
+        let down = run_folder_sync(&remote, &local_download);
+        assert!(down.success, "download failed: {}", down.message);
+        let content = std::fs::read(download_dir.path().join(&filename)).unwrap();
+        assert_eq!(content, b"hello from rs-sync local-to-smb test");
     }
 }
