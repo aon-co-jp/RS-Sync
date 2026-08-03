@@ -56,6 +56,43 @@ cargo test --test sync_integration -- --test-threads=1
 
 (cwdをテスト内で変更するため`--test-threads=1`必須。)
 
+## HANDOFF追記(2026-08-03続き2) デスクトップ向けインストーラーmacOS/Windows対応+Android版アプリシェル新規実装
+
+ユーザー指示「デスクトップ向けインストーラー(Windows/Linux/Mac)の整備して
+Androidスマホとタブレットも一緒に整備して、iPhoneは後回しで良いです」。
+
+1. **`install.sh`にmacOS対応を追加**: 従来Linux専用(systemd --user
+   決め打ち)だったのを`uname -s`でOS判定し、macOSでは`launchd`の
+   ユーザーagent(`~/Library/LaunchAgents/tokyo.aon.rs-sync.plist`、
+   `RunAtLoad`+`KeepAlive`でsystemdの`enable --now`+`Restart=on-failure`
+   相当を実現)を登録するようにした。
+2. **`install.ps1`にWindows常駐化を追加**: 従来は手動起動スクリプトの
+   生成のみで「サービス登録はしない」と明記されていたが、Task Scheduler
+   タスク(ログオントリガー+`RestartCount 999`で自動再起動)を対話的に
+   登録できるようにし、Linux/macOSの自動起動機能と揃えた。
+3. **Android版アプリシェルを新規実装**(`android/`、
+   `open-redmine/android`のリモートクライアント設計をそのまま移植・
+   RS-Sync向けに文言調整): RS-Sync本体をAndroid上で実行するのではなく、
+   リモートインスタンスの`GET /healthz`へ疎通確認し、「ブラウザで開く」で
+   既存のWebUIへ委ねる設計。3電源プロファイル(省電力/通常/常時電源接続)・
+   スマホ/タブレット両レイアウト(`layout`/`layout-sw600dp`)は参照実装と
+   同一パターン。
+4. **検証(実測)**: `cargo test --lib`36件全green(回帰無し)。
+   `gradle :app:assembleDebug`→**BUILD SUCCESSFUL**、
+   `app-debug.apk`(約3.24MB)を実際に生成することを確認。
+   `bash -n install.sh`・PowerShellの`Parser::ParseInput`でinstall.ps1の
+   構文検証済み。
+5. **正直な開示**: (1) macOS版launchd・Windows版Task Scheduler登録は
+   いずれもこの開発環境(Windows)では実機検証できていない(スクリプトの
+   コードレビュー+構文検証のみ)。(2) Android実機/エミュレータでの
+   起動・`/healthz`実疎通確認は今回未実施(ビルド成功の確認まで)。
+   (3) iPhone/iPad対応はユーザー指示により後回し
+   (`open-easy-web/IOS_FEASIBILITY_MEMO.md`に実現可能性調査を記録済み)。
+  - 次にすべきこと: (1) 実macOS環境でのlaunchd登録実地確認、
+    (2) 実Windows環境でのTask Scheduler登録実地確認、(3) Android実機/
+    エミュレータでの起動確認、(4) これらのインストーラー整備を
+    他リポジトリ(open-easy-web等)へも横展開するか判断。
+
 ## HANDOFF追記(2026-08-03続き) SMBバックエンドを追加(WiFiルーターUSB共有・市販NAS対応)
 
 ユーザー指示「端末間ドライブ同期+自動バックアップに、WiFiルーターに
