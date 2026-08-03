@@ -56,6 +56,42 @@ cargo test --test sync_integration -- --test-threads=1
 
 (cwdをテスト内で変更するため`--test-threads=1`必須。)
 
+## HANDOFF追記(2026-08-03続き) SMBバックエンドを追加(WiFiルーターUSB共有・市販NAS対応)
+
+ユーザー指示「端末間ドライブ同期+自動バックアップに、WiFiルーターに
+接続のUSBメモリーや外付けHDDやNASなども対応...に着手して」への対応
+(デスクトップ優先+WiFiルーターUSB/HDD対応を同時に進める方針、ユーザー
+選択済み)。
+
+1. **背景**: 家庭用WiFiルーター(バッファロー・NECアテルモ等)のUSB
+   ストレージ共有機能・市販NASの大半はSSH/SFTPではなく**SMB
+   (Windowsファイル共有、CIFS)**でのみアクセス可能。既存の
+   `FolderEndpointKind`(`Local`/`Sftp`)では対応できなかった。
+2. **実装**: `smb2`crate(Pure-Rust SMB2/3クライアント、`libsmbclient`等の
+   ネイティブ依存無し)を追加、`FolderEndpointKind::Smb`+`SmbBackend`
+   (既存の`FolderBackend`トレイトへ統一実装)を新設。`smb2`crateは
+   tokio非同期APIのみのため、接続ごとに専用の使い捨てtokioランタイムを
+   保持し`block_on`する設計(`open-easy-web`の`dist_sync.rs`が
+   `SftpBackupTarget`で採用している「使い捨てランタイム」パターンと同じ)。
+   `FolderEndpoint`に`share: String`フィールド(`#[serde(default)]`で
+   既存データとの後方互換維持)を追加。UI(`static/index.html`)にも
+   種類選択肢・共有名入力欄・日英ラベルを追加。
+3. **検証(実測)**: `cargo build`/`cargo test --lib`36件全green
+   (回帰無し)。VPS本番(`rs-sync`・`rs-sync-demo`両サービス)へも
+   `git pull`→`cargo build --release`→`systemctl restart`まで実施、
+   両サービスとも`active`、`https://easy-web.tokyo/rs-sync/`・
+   `/rs-sync/demo/`とも200を確認。
+4. **正直な開示**: この開発環境には実際のWiFiルーターUSB共有・市販NAS
+   実機が無く、**SMB接続自体の実機検証はできていない**(`smb2`crateの
+   公開APIどおりに実装したのみ、SFTPの時と違い実機での往復確認が
+   まだ済んでいない)。次回、実際のルーター/NAS機器で接続確認を行うこと。
+  - 次にすべきこと: (1) 実ルーター/NAS実機でのSMB接続確認、
+    (2) デスクトップ(Windows/Linux/Mac)向けのインストーラー付き
+    同期クライアント本体の設計・実装(今回はバックエンドのプロトコル
+    対応のみ、常駐型クライアントアプリ自体は別途)、(3) iOS/iPadOS対応は
+    `open-easy-web/IOS_FEASIBILITY_MEMO.md`に実現可能性調査を記録済み
+    (今回は実装未着手、ユーザー指示により次回持ち越し)。
+
 ## HANDOFF追記(2026-08-03) フォルダ同期(SFTP)を実VPSで初検証、実バグ1件を発見・修正
 
 ユーザー指示「RSyncのVPSやレンタルサーバーのフォルダーやGithub...
