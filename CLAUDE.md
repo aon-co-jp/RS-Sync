@@ -93,6 +93,32 @@ Androidスマホとタブレットも一緒に整備して、iPhoneは後回し�
     エミュレータでの起動確認、(4) これらのインストーラー整備を
     他リポジトリ(open-easy-web等)へも横展開するか判断。
 
+## HANDOFF追記(2026-08-03続き3) Windows Task Scheduler登録を実際に試行、この開発環境固有の権限制約を発見(正直な開示)
+
+この開発環境自体がWindowsであるため、`install.ps1`のTask Scheduler
+登録部分を実際に動かして検証を試みた。
+
+1. **実施**: `whoami`で現在のユーザーが`aon\norukia`(ドメインアカウント、
+   非管理者、`IsInRole(Administrator)`が`False`)であることを確認した
+   上で、`Register-ScheduledTask`を実際に呼び出した。
+2. **結果**: `Access is denied`(HRESULT 0x80070005)で失敗。ログオン
+   トリガーのみを使う per-user タスク登録は通常、管理者権限を要求しない
+   Windows標準機能だが、このドメイン参加済みマシンにはグループポリシー等で
+   Task Scheduler書き込みが追加制限されている可能性が高い(スクリプト側の
+   実装不備によるものではなく、この特定の開発環境固有の権限制約と判断)。
+3. **代替検証**: 生成されるlaunchd plist(macOS向け)のXML構文が正しい
+   ことは`python -c "xml.dom.minidom.parse(...)"`で別途確認した(整形式
+   であることの裏付け、実際のlaunchd登録自体はmacOS実機が必要)。
+4. **正直な開示**: 上記により、`install.ps1`のTask Scheduler登録機能・
+   `install.sh`のlaunchd登録機能とも、**このセッションでは実環境での
+   最終確認(実際にタスクが起動しrs-syncプロセスが立ち上がること)が
+   できていない**——コードレビュー+部分的な構文検証までに留まる。
+   次回、管理者権限のある個人所有Windows機・実macOS環境で改めて確認
+   すること。
+  - 次にすべきこと: (1) 管理者権限のあるWindows環境でのTask Scheduler
+    実地確認、(2) 実macOS環境でのlaunchd実地確認、(3) Android実機/
+    エミュレータでの起動確認(未着手のまま継続)。
+
 ## HANDOFF追記(2026-08-03続き) SMBバックエンドを追加(WiFiルーターUSB共有・市販NAS対応)
 
 ユーザー指示「端末間ドライブ同期+自動バックアップに、WiFiルーターに
