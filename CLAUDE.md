@@ -56,6 +56,41 @@ cargo test --test sync_integration -- --test-threads=1
 
 (cwdをテスト内で変更するため`--test-threads=1`必須。)
 
+## HANDOFF追記(2026-08-01) OpenGiteaプロバイダの実機再検証+空トークン時の実装統一(ユーザー指示「RSyncのVPSやレンタルサーバーのフォルダーやGithub、Gitbucket、Bitbucket、Gitlab、Gitea同士などの連携対応動作確認」)
+
+同時並行タスクとして、各プロバイダの実際の疎通状態を再点検した。
+
+1. **OpenGitea(実機で再検証)**: 本セッションで新規に本番稼働させた
+   `https://easy-web.tokyo/open-gitea/`に対し、実際に`list_repos`
+   (`GET /api/repos`)・`ensure_repo`(`PUT /repos/:name`)相当のHTTP
+   リクエストを実行して確認した(モックではなく実サーバー)。
+   - `GET /api/repos`(空Bearerトークン)→実際に`200 []`。
+   - `PUT /repos/rs-sync-verification-test`(空Bearerトークン)→実際に
+     `403 repository creation not permitted for this account`
+     (`ensure_repo`の401/403判定ロジックが正しくエラーとして拾う
+     ことを実際のレスポンスで確認)。
+   - **発見**: `OpenGiteaProvider`は`GitHubProvider`が2026-07-29に
+     修正済みの「空トークン時は`Authorization`ヘッダー自体を送らない」
+     パターン(`maybe_auth_header`)を使っておらず、常に
+     `Authorization: Bearer <token>`(空でも)を送っていた。open-gitea
+     自身は現状これを許容する実装だが、GitHubで実際に踏んだのと同種の
+     罠を将来再現するリスクがあるため、`list_repos`/`ensure_repo`とも
+     `maybe_auth_header`経由に統一した。`cargo test --lib`36件全green
+     (回帰無し)、VPS本番(`rs-sync`・`rs-sync-demo`)へデプロイ・
+     再起動後も`/rs-sync/`・`/rs-sync/demo/`とも200のまま。
+2. **Gitea/GitBucket/GitLab/Bitbucket(引き続き未検証、正直な開示)**:
+   これら4プロバイダの実サーバーがこのセッションの環境には存在せず
+   (実際にGitea/GitBucket/GitLab/Bitbucketサーバーを新規に構築する
+   ことは本タスクのスコープを大きく超える別プロジェクト規模の
+   インフラ整備が必要)、公開APIドキュメントに基づく実装のみで
+   引き続き実機検証できていない。
+3. **フォルダ同期(SFTP、VPS/レンタルサーバー間)**: 2026-07-29(続き5)の
+   実装以降、実SFTPサーバーでの実機検証は依然として未実施のまま
+   (ローカル↔ローカルの実I/O検証のみ済み、上記HANDOFF参照)。
+- 次にすべきこと: (1) 実Gitea/GitBucket/GitLab/Bitbucketサーバーでの
+  実機検証(インフラ整備が前提、別途優先度判断が必要)、(2) 実SFTP
+  サーバーでのフォルダ同期実機検証。
+
 ## HANDOFF
 
 - **2026-07-23(続き) `.github/workflows/release.yml`を新規追加、
