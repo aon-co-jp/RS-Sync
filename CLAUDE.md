@@ -93,6 +93,60 @@ Androidスマホとタブレットも一緒に整備して、iPhoneは後回し�
     エミュレータでの起動確認、(4) これらのインストーラー整備を
     他リポジトリ(open-easy-web等)へも横展開するか判断。
 
+## HANDOFF追記(2026-08-03続き4) 実機検証まとめ: Task Scheduler成功、Android実機はネットワーク分離で保留、SMBは実ルーターがSMB1のみ対応と判明
+
+ユーザーが実際に管理者権限のWindows PC・Android実機(FCNT WE2 Plus)・
+WiFiルーター(ASUS RT-AC65U、USBストレージ+Samba共有)を用意し、
+順に実機検証を行った(2026-08-03、同日中の続きセッション)。
+
+1. **Windows Task Scheduler登録: 実機で成功を確認**。ユーザーに管理者
+   PowerShellで実際に`Register-ScheduledTask`→`Start-ScheduledTask`を
+   実行してもらい、`http://127.0.0.1:18095/healthz`が実際に`200 ok`を
+   返すことを確認した(=タスクが実際にログオントリガーで起動し、
+   `rs-sync.exe`が正しく立ち上がった証拠)。**`install.ps1`のWindows
+   常駐化機能は実環境で動作確認済みとなった**。
+2. **Android実機(USB経由)**: FCNT製「WE2 Plus」を用意してもらい
+   USB接続を試みたが、PC側では単純な「USB大容量記憶装置」としてのみ
+   認識され、MTPモード切替後も`adb devices`に一切出現しなかった。
+   Google公式USBドライバの手動インストールも試したが変化なし
+   ——キャリア/メーカー側でADB自体を制限している可能性が高いと判断。
+3. **Android実機(WiFiワイヤレスデバッグ経由)**: ペアリングコード+
+   IP:ポートを複数回取得し`adb pair`を試したが
+   `protocol fault(couldn't read status message)`で失敗。
+   `Test-NetConnection`で生TCP接続自体が`False`だったことから、
+   **アプリ層以前のネットワークレベルでの遮断**と判明——このPCが
+   参加する企業ネットワーク(`aon`ドメイン、SSID`aon.tokyo AP AS 5G 2`)の
+   クライアント分離(AP アイソレーション)が原因である可能性が高い。
+   Android実機検証はこの制約により保留とした。
+4. **SMB(WiFiルーターのUSBストレージ共有)**: ASUS RT-AC65Uの管理画面で
+   Samba共有を確認・有効化(「Samba 共有」タブ、共有名
+   `RT-AC65U-3FD8`)し、ポート445への実TCP到達を確認した上で、
+   `smb2`crateによる実接続を試みた——**SMB2 Negotiateリクエスト送信
+   直後にサーバー側から切断される**という結果になった。念のため
+   Windows標準のSMBクライアント(`net use`)でも同じ共有への接続を
+   試したところ、こちらも`System error 64`(接続不可)で失敗——
+   **同じ症状が異なる2つのSMB2/3クライアント実装で再現した**ため、
+   コード側の不具合ではなく、**このルーターのSamba実装がSMB1
+   (旧世代プロトコル)のみに対応しており、SMB2/3専用の`smb2`crateとは
+   そもそもプロトコルレベルで互換性が無い**と判断した(Windows 11は
+   既定でSMB1クライアントが無効化されているため、Windows自身の
+   `net use`も同じ理由で失敗したと推測される、こちらは管理者権限が
+   必要な`Get-WindowsOptionalFeature`で最終確認までは至っていない)。
+5. **正直な開示・今後の対応方針**: SMB1のみ対応の家庭用ルーターは
+   相当数現存すると考えられるため、`SmbBackend`をSMB1(CIFS)にも
+   対応させるか(`smb2`crateはSMB2/3専用のため、SMB1対応には別crateまたは
+   `pavao`〈libsmbclient FFIバインディング、SMB1/2/3全対応〉への切り替えが
+   必要)、あるいは「SMB2/3対応ルーター/NASのみサポート」と明確に
+   スコープを絞るかは次回判断すること。今回検証した実機(ASUS
+   RT-AC65U)はSMB1専用だったため、少なくとも現状の実装ではこの
+   ルーターを使えないという実害が確認された。
+  - 次にすべきこと: (1) `SmbBackend`のSMB1対応要否の判断(`pavao`crateへの
+    切り替え検討、ただしlibsmbclientネイティブ依存が入るためクロス
+    プラットフォームビルドへの影響を要確認)、(2) SMB2/3対応の別の
+    ルーター/NAS実機があれば再検証、(3) Android実機検証はネットワーク
+    分離の制約が無い環境(モバイルルーター等)で再挑戦、(4) Windows
+    SMB1クライアント状態の管理者権限での最終確認。
+
 ## HANDOFF追記(2026-08-03続き3) Windows Task Scheduler登録を実際に試行、この開発環境固有の権限制約を発見(正直な開示)
 
 この開発環境自体がWindowsであるため、`install.ps1`のTask Scheduler
