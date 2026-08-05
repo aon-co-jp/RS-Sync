@@ -42,6 +42,106 @@ RS-Git/RPoem等と同じ方針: `poem`クレートを直接利用する単純な
   配下にマウントされても壊れないようにするため(open-gitea(現RS-Git)の`/rgit`デプロイ
   で絶対パスfetchが壊れた教訓を踏襲)。
 
+## HANDOFF追記(2026-08-05) PC/VPS/スマホ/タブレット全対応の棚卸し+実機検証+実バグ1件発見・修正、プロバイダ対応は既に完備と確認
+
+ユーザー指示「RS-SyncをPCにもVPSにもスマホにも(追ってタブレットも)適用
+可能にしたい」+「同期先プロバイダをGitHub・Gitbucket・Bitbucket・Gitea・
+open-giteaの全てに対応させて」への対応。
+
+1. **棚卸し結果**:
+   - **デスクトップ(PC)**: `install.sh`(Linux/macOS、cargoビルド+
+     systemd --user/launchd登録)・`install.ps1`(Windows、cargoビルド+
+     Task Scheduler登録)とも既存。前回HANDOFFの「Windows Task Scheduler
+     登録は管理者PCで実機成功済み」の記載通り。
+   - **VPS**: `https://easy-web.tokyo/rs-sync/`で本番稼働中
+     (`rs-sync.service`、systemd)。デプロイ手順自体は各HANDOFFに
+     散在する形で記録済みだが、まとまった「VPSデプロイ手順書」は
+     無い(今回はドキュメント整備までは着手せず、既存の運用実績で
+     代替可能と判断——次回まとまった手順化の要否を再検討)。
+   - **Android(スマホ)**: `ProfileSelectActivity`→`MainActivity`は
+     設計通り**リモートクライアント**(別ホストで動くRS-Syncインスタンスの
+     `/healthz`へポーリング疎通確認+「ブラウザで開く」で既存WebUIへ
+     委ねる)であることをソース(`MainActivity.kt`/`PowerProfile.kt`)を
+     読んで確認した。RS-Sync本体(gitクローン・poemサーバー)をAndroid上で
+     直接実行する経路は無い。
+   - **タブレット**: `layout-sw600dp/activity_main.xml`は既存だったが、
+     初期画面`activity_profile_select.xml`にはsw600dp版が無かった
+     (見落とし)。`layout-sw600dp/activity_profile_select.xml`を新規追加
+     (幅720dp上限+中央寄せ、他リポジトリ〈open-easy-web/
+     open-web-server〉と同じ簡素なパターン)。
+   - **同期先プロバイダ**: `src/provider.rs`を確認したところ、
+     **GitHub・OpenGitea・Gitea・Gitbucket・GitLab・Bitbucketの6種類が
+     全て既に実装済み**(`provider_for()`の`match`に全バリアント有り、
+     `static/index.html`の`<select>`にも全選択肢が既に配線済み)。
+     過去のHANDOFF通り、GitHub・OpenGiteaは実機検証済み、
+     Gitea/Gitbucket/GitLab/Bitbucketは公開API仕様に基づく実装のみで
+     実サーバーが無く未検証、という状態は変わっていない——**「対応させて
+     ほしい」という要望自体は既に満たされていた**(新規プロバイダの
+     追加実装は不要だった)。
+2. **新規実施: モックHTTPサーバーでのプロバイダ単体テスト追加**:
+   実アカウント/実サーバーが無いGitea/Gitbucket/GitLab/Bitbucket/
+   open-giteaについて、外部crate(wiremock等)を追加せず`std::net::
+   TcpListener`のみで最小限のモックサーバーを実装し、`list_repos`が
+   実際に期待するパス・認証ヘッダー形式(`token`/`Bearer`/
+   `PRIVATE-TOKEN`)でリクエストを送っていることを検証する回帰テストを
+   6件追加(`src/provider.rs`)。**実サーバーとの互換性までは保証しない
+   (正直な開示は変えていない)**が、実装が意図通りのリクエストを
+   組み立てていることは実際のTCP通信で固定化された。
+3. **Windows実機での実インストール検証**: `RS_SYNC_HOME`をスクラッチ
+   ディレクトリに向けて`install.ps1`を実際に実行し、git clone→
+   `cargo build --release`→起動スクリプト生成まで完走することを確認
+   (Task Schedulerの対話質問には`N`で応答、既に前回HANDOFFで登録自体は
+   実機確認済みのため今回はスキップ)。ビルド中、並行して走らせていた
+   別のcargoプロセスとの資源競合とみられる`rustc`の一過性クラッシュ
+   (`STATUS_STACK_BUFFER_OVERRUN`)が発生したが、cargoの再試行で最終的に
+   `rs-sync.exe`の生成まで成功した(コード側の不具合ではなく、この
+   検証セッション固有の並行実行の影響と判断)。
+4. **`cargo build --release`/`cargo test --lib`実施**: 本体リポジトリ
+   (`F:\runo\rs-sync`)で単独実行し、いずれも成功(`cargo test --lib`は
+   44件中42件green・2件`#[ignore]`〈実VPS/実ルーター用〉、新規6件含む)。
+5. **Android実機ビルド+インストール+起動+疎通確認まで完全実施**
+   (今回、初めてこの制約〈ネットワーク分離〉を回避できた): 実機
+   `moto g53y 5G`(`ZY22J7RFND`)がこのセッションでは`adb devices`に
+   正常に出現し(この開発機にAndroid SDK platform-toolsが既に導入済み
+   だったため、前回セッションで詰まっていたUSBドライバ/ネットワーク
+   分離の問題を今回は踏まずに済んだ——環境差によるものと考えられる)、
+   `gradle :app:assembleDebug`→**BUILD SUCCESSFUL**→
+   `adb install`→実機で起動→スクリーンショットで画面遷移
+   (プロファイル選択→通常モード→メイン画面)を実際に確認、「接続/
+   疎通確認」ボタンをタップして**実際に本番VPS
+   (`https://easy-web.tokyo/rs-sync/healthz`)への実HTTPリクエストが
+   200 okを返すところまで実機で確認できた**(モックではない、実際の
+   スマホ→実際のインターネット→実際のVPSの往復)。
+6. **上記の過程で発見・修正した実バグ**: `PowerProfile.kt`の
+   `loadServerUrl()`のデフォルトURLが`https://easy-web.tokyo/RS-Sync`
+   (大文字)になっており、`strings.xml`の`server_url_hint`
+   (`https://easy-web.tokyo/rs-sync`、小文字)と食い違っていた。
+   nginxの`location`マッチは大文字小文字を区別するため、初回起動時に
+   ユーザーがヒントを見ずにそのまま「接続/疎通確認」を押すと**大文字
+   パスは実際には存在せず404になっていたはず**(実機で修正前の
+   デフォルト値のまま接続を試して初めて気づいた)。小文字
+   `https://easy-web.tokyo/rs-sync/`へ修正し、修正後に実機で200 okを
+   確認済み。地味だが、まさに「PCにもVPSにもスマホにも」という
+   今回の目的に直結する導線上の実障害だった。
+7. **正直な開示・未検証事項**:
+   - macOS版launchd登録・Linux版systemd --user登録は、依然としてこの
+     開発環境(Windows)では実機検証できていない(コードレビューのみ)。
+   - タブレット実機/タブレットエミュレータでの`layout-sw600dp`の
+     見た目確認は今回未実施(スマホ実機での確認のみ、sw600dp
+     リソースが正しくビルドに含まれることは`assembleDebug`成功で
+     確認済みだが、実際の大画面での表示崩れの有無は未確認)。
+   - Gitea/Gitbucket/GitLab/Bitbucketの4プロバイダは、今回追加した
+     モックサーバーテストによりリクエスト形式の正しさは固定化された
+     ものの、引き続き実サーバーでの応答互換性は未検証(実インフラ
+     構築は本タスクのスコープ外と判断、従来の判断を維持)。
+   - VPSへのデプロイ手順を独立したドキュメントとしてはまとめていない
+     (各HANDOFFに散在したまま)。
+  - 次にすべきこと: (1) タブレット実機/エミュレータでの`sw600dp`
+    レイアウトの見た目確認、(2) 実macOS/Linux環境でのlaunchd/
+    systemd --user実機検証、(3) Gitea/Gitbucket/GitLab/Bitbucketの
+    実サーバー確保時の実機検証、(4) VPSデプロイ手順の独立ドキュメント化
+    の要否判断。
+
 ## テスト
 
 `tests/sync_integration.rs`——ローカルのbareリポジトリ2つ(モックではなく

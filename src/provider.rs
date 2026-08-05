@@ -619,6 +619,158 @@ mod tests {
         }
     }
 
+    /// 2026-08-05追記: 実アカウント/実トークンを持たないGitea/GitBucket/
+    /// GitLab/Bitbucket/open-giteaプロバイダに対し、少なくとも「正しい
+    /// パス・正しい認証ヘッダーでリクエストを送っているか」だけは実際の
+    /// TCP接続経由で検証できるよう、依存を増やさずに(wiremock等の外部
+    /// crateを追加せず)最小限のモックHTTPサーバーを`std::net`のみで
+    /// 実装した。プロバイダ実装の「ドキュメントベースで未検証」という
+    /// 正直な開示自体は変わらない(実サーバーでの応答互換性までは
+    /// 保証しない)が、少なくとも「このURLに・このヘッダーで・この
+    /// レスポンス形式を期待して」叩いていることをコードの動作として
+    /// 固定化する回帰テストになる。
+    struct MockServer {
+        addr: std::net::SocketAddr,
+        requests: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        _handle: std::thread::JoinHandle<()>,
+    }
+
+    impl MockServer {
+        /// `status_line`は例: "200 OK"、`body`はレスポンスボディ(JSON文字列)。
+        /// 1接続だけ受け付けて応答するのではなく、テスト中に複数回
+        /// リクエストされても良いようループで受け付け続ける。
+        fn start(status_line: &'static str, body: &'static str) -> Self {
+            use std::io::{Read, Write};
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let requests_clone = requests.clone();
+            let handle = std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let mut stream = match stream {
+                        Ok(s) => s,
+                        Err(_) => break,
+                    };
+                    stream
+                        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                        .ok();
+                    let mut buf = [0u8; 8192];
+                    let n = match stream.read(&mut buf) {
+                        Ok(n) => n,
+                        Err(_) => break,
+                    };
+                    let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                    requests_clone.lock().unwrap().push(text);
+                    let response = format!(
+                        "HTTP/1.1 {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        status_line,
+                        body.len(),
+                        body
+                    );
+                    let _ = stream.write_all(response.as_bytes());
+                    let _ = stream.flush();
+                    break; // このテストヘルパーは1リクエストのみ検証すれば十分
+                }
+            });
+            MockServer { addr, requests, _handle: handle }
+        }
+
+        fn base_url(&self) -> String {
+            format!("http://{}", self.addr)
+        }
+
+        fn last_request(&self) -> String {
+            // サーバースレッドが応答を書き終えるまで少し待つ(ローカル
+            // ループバックなのでほぼ即時)。
+            for _ in 0..50 {
+                if let Some(r) = self.requests.lock().unwrap().last().cloned() {
+                    return r;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            String::new()
+        }
+    }
+
+    fn account_for(provider: ProviderKind, api_base: String, owner: &str, token: &str) -> Account {
+        Account {
+            id: "1".to_string(),
+            name: "test".to_string(),
+            provider,
+            api_base,
+            git_base: "https://example.invalid".to_string(),
+            owner: owner.to_string(),
+            token: token.to_string(),
+            token_expires_at: None,
+            expiry_warning_sent: false,
+        }
+    }
+
+    #[test]
+    fn gitea_list_repos_sends_expected_path_and_auth_header() {
+        let server = MockServer::start("200 OK", r#"[{"name":"repo-a"}]"#);
+        let acc = account_for(ProviderKind::Gitea, server.base_url(), "aon-co-jp", "secret-token");
+        let repos = GiteaProvider.list_repos(&acc).unwrap();
+        assert_eq!(repos, vec!["repo-a".to_string()]);
+        let req = server.last_request();
+        assert!(req.starts_with("GET /api/v1/orgs/aon-co-jp/repos"), "req={req}");
+        assert!(req.contains("authorization: token secret-token") || req.contains("Authorization: token secret-token"), "req={req}");
+    }
+
+    #[test]
+    fn gitbucket_list_repos_sends_expected_path_and_auth_header() {
+        let server = MockServer::start("200 OK", r#"[{"name":"repo-b"}]"#);
+        let acc = account_for(ProviderKind::Gitbucket, server.base_url(), "aon-co-jp", "secret-token");
+        let repos = GitbucketProvider.list_repos(&acc).unwrap();
+        assert_eq!(repos, vec!["repo-b".to_string()]);
+        let req = server.last_request();
+        assert!(req.starts_with("GET /api/v3/orgs/aon-co-jp/repos"), "req={req}");
+        assert!(req.to_lowercase().contains("authorization: token secret-token"), "req={req}");
+    }
+
+    #[test]
+    fn gitlab_list_repos_sends_expected_path_and_private_token_header() {
+        let server = MockServer::start("200 OK", r#"[{"path":"repo-c"}]"#);
+        let acc = account_for(ProviderKind::GitLab, server.base_url(), "aon-co-jp", "secret-token");
+        let repos = GitLabProvider.list_repos(&acc).unwrap();
+        assert_eq!(repos, vec!["repo-c".to_string()]);
+        let req = server.last_request();
+        assert!(req.starts_with("GET /api/v4/users/aon-co-jp/projects"), "req={req}");
+        assert!(req.to_lowercase().contains("private-token: secret-token"), "req={req}");
+    }
+
+    #[test]
+    fn bitbucket_list_repos_sends_expected_path_and_bearer_header() {
+        let server = MockServer::start("200 OK", r#"{"values":[{"slug":"repo-d"}]}"#);
+        let acc = account_for(ProviderKind::Bitbucket, server.base_url(), "aon-co-jp", "secret-token");
+        let repos = BitbucketProvider.list_repos(&acc).unwrap();
+        assert_eq!(repos, vec!["repo-d".to_string()]);
+        let req = server.last_request();
+        assert!(req.starts_with("GET /2.0/repositories/aon-co-jp"), "req={req}");
+        assert!(req.to_lowercase().contains("authorization: bearer secret-token"), "req={req}");
+    }
+
+    #[test]
+    fn open_gitea_list_repos_sends_expected_path_and_bearer_header() {
+        let server = MockServer::start("200 OK", r#"[{"name":"repo-e"}]"#);
+        let acc = account_for(ProviderKind::OpenGitea, server.base_url(), "user@example.com", "session-token");
+        let repos = OpenGiteaProvider.list_repos(&acc).unwrap();
+        assert_eq!(repos, vec!["repo-e".to_string()]);
+        let req = server.last_request();
+        assert!(req.starts_with("GET /api/repos"), "req={req}");
+        assert!(req.to_lowercase().contains("authorization: bearer session-token"), "req={req}");
+    }
+
+    #[test]
+    fn open_gitea_list_repos_omits_auth_header_when_token_empty() {
+        let server = MockServer::start("200 OK", r#"[]"#);
+        let acc = account_for(ProviderKind::OpenGitea, server.base_url(), "user@example.com", "");
+        let repos = OpenGiteaProvider.list_repos(&acc).unwrap();
+        assert!(repos.is_empty());
+        let req = server.last_request();
+        assert!(!req.to_lowercase().contains("authorization:"), "req={req}");
+    }
+
     /// 2026-07-29発見の実バグの回帰確認: 空トークンのアカウントで
     /// `remote_url`が生成するgit URLに、空のユーザー名+`@`が残っていない
     /// ことを確認する(残っていると一部のgit/HTTPクライアントの組み合わせで

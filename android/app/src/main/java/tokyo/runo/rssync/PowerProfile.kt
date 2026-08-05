@@ -42,7 +42,14 @@ enum class PowerProfile(val prefValue: String, val label: String, val emoji: Str
 
         fun loadServerUrl(context: Context): String {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            return prefs.getString(KEY_SERVER_URL, null) ?: "https://easy-web.tokyo/RS-Sync"
+            // 2026-08-05修正: 実機検証で発覚した実バグ——ここが誤って
+            // "RS-Sync"(大文字)になっており、実際の本番パス
+            // "https://easy-web.tokyo/rs-sync/"(小文字、nginxの
+            // location設定は大文字小文字を区別する)と一致していなかった。
+            // strings.xmlのserver_url_hintは元々正しく小文字だったため、
+            // 初回起動時にヒント表示と実際のデフォルト値が食い違って
+            // いた状態。
+            return prefs.getString(KEY_SERVER_URL, null) ?: "https://easy-web.tokyo/rs-sync/"
         }
 
         fun saveServerUrl(context: Context, url: String) {
