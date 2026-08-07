@@ -42,6 +42,71 @@ RS-Git/RPoem等と同じ方針: `poem`クレートを直接利用する単純な
   配下にマウントされても壊れないようにするため(open-gitea(現RS-Git)の`/rgit`デプロイ
   で絶対パスfetchが壊れた教訓を踏襲)。
 
+## HANDOFF追記(2026-08-07) タブレットエミュレータでsw600dpレイアウト実機検証+実バグ1件発見・修正
+
+前回HANDOFF(2026-08-05)の「次にすべきこと(1) タブレット実機/エミュレータ
+での`sw600dp`レイアウトの見た目確認」に対応。
+
+1. **タブレットAVD新規作成**: この開発機にAndroid SDK
+   (`%LOCALAPPDATA%\Android\Sdk`)・emulator・system-image
+   (`android-37.0/google_apis_playstore_ps16k/x86_64`)が導入済み
+   だったが、`avdmanager`コマンド自体は同梱されておらず(cmdline-tools
+   未導入)、AVD定義が1つ(`Pixel_9_Pro`、電話サイズ)しか無かった。
+   `avdmanager`を使わず`~/.android/avd/rs_sync_tablet.avd/config.ini`を
+   直接作成する方式で、10.1インチ相当タブレット
+   (`hw.lcd.width=2560`/`height=1600`/`density=213`、
+   smallest-width計算で約1922dp相当、sw600dp/sw720dpどちらの
+   リソースバケットにも該当)のAVDを新規作成し、実際に起動できる
+   ことを確認した。
+2. **実機(エミュレータ)起動+APKインストール+画面遷移確認**:
+   `%USERPROFILE%\.gradle\wrapper\dists`に既存のGradle 8.11.1
+   配布物が見つかったため(`gradle`コマンド自体はPATH上に無い環境
+   だった)、そのパスから直接`gradle.bat :app:assembleDebug`を実行し
+   `BUILD SUCCESSFUL`。生成された`app-debug.apk`をタブレットAVD
+   (`emulator-5554`)へ`adb install`、`ProfileSelectActivity`を起動して
+   実際にスクリーンショットで画面を確認した(起動直後にSwiftShader
+   ソフトウェアレンダリングの影響とみられるSystemUIの一時的なANR
+   が発生したが、待機で自然に回復・実害なし)。
+3. **発見した実バグ**: `layout-sw600dp/activity_main.xml`・
+   `layout-sw600dp/activity_profile_select.xml`の両方で、内側の
+   `LinearLayout`が`android:layout_width="match_parent"`のまま
+   `android:maxWidth="720dp"`を指定していた。Android仕様上
+   `android:maxWidth`は`layout_width="wrap_content"`の場合のみ有効
+   ("幅720dp上限+中央寄せ"というレイアウト意図が実際には機能せず)、
+   実機スクリーンショットで実際に画面全幅(2560px)へ左寄せで
+   伸びきって表示されることを確認した(前回HANDOFFで「ビルド成功の
+   確認まで」と書いた際は、この見た目の破綻を見逃していたことになる)。
+   `layout_width`を`wrap_content`に変更して再ビルド・再インストール・
+   再スクリーンショットし、中央寄せ+720dp上限が実際に機能する
+   ことを確認した(`ProfileSelectActivity`・`MainActivity`の両画面で
+   確認済み)。open-easy-web/open-web-server側の同一パターンを踏襲した
+   実装だったため、同種のバグが他リポジトリにも存在する可能性がある
+   (今回はrs-sync内の修正のみ実施、横展開の要否は未判断)。
+4. **正直な開示・未着手事項**:
+   - 今回検証したのはタブレット**エミュレータ**であり、実機タブレット
+     (物理デバイス)での確認はまだ行っていない。
+   - macOS版launchd・Linux版systemd --user実機検証は、依然として
+     この開発環境(Windows)では実施不可能(未着手のまま)。
+   - Gitea/Gitbucket/GitLab/Bitbucketの実サーバー確保時の実機検証は
+     引き続き未着手(実インフラが無い)。
+   - VPSデプロイ手順の独立ドキュメント化は今回も未着手。
+   - `cargo build --release`を今回のセッションでも実行しようとしたが、
+     タイムアウトのため完走確認まではできなかった(Androidエミュレータ
+     関連の作業に時間を要したため。コード変更はAndroidの`.xml`のみで
+     Rust側に変更は無いため、直近のHANDOFF(2026-08-05)で確認済みの
+     `cargo test --lib`green状態からの回帰は無いと考えられるが、
+     今回のセッションでの再実行確認はできていない)。
+   - 他プロジェクト(open-easy-web/open-web-server等)の同一パターンへの
+     横展開要否は未判断。
+  - 次にすべきこと: (1) 実機タブレット(物理デバイス)での見た目確認、
+    (2) open-easy-web/open-web-server等、同一の`maxWidth`+
+    `layout_width="match_parent"`パターンを使っている他リポジトリに
+    同種のバグが無いか横展開確認、(3) 実macOS/Linux環境でのlaunchd/
+    systemd --user実機検証、(4) Gitea/Gitbucket/GitLab/Bitbucketの
+    実サーバー確保時の実機検証、(5) VPSデプロイ手順の独立ドキュメント化
+    の要否判断、(6) 次回セッションで`cargo build --release`/
+    `cargo test --lib`の完走を再確認。
+
 ## HANDOFF追記(2026-08-05) PC/VPS/スマホ/タブレット全対応の棚卸し+実機検証+実バグ1件発見・修正、プロバイダ対応は既に完備と確認
 
 ユーザー指示「RS-SyncをPCにもVPSにもスマホにも(追ってタブレットも)適用
