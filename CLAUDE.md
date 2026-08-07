@@ -42,6 +42,50 @@ RS-Git/RPoem等と同じ方針: `poem`クレートを直接利用する単純な
   配下にマウントされても壊れないようにするため(open-gitea(現RS-Git)の`/rgit`デプロイ
   で絶対パスfetchが壊れた教訓を踏襲)。
 
+## HANDOFF追記(2026-08-07続き) VPS/スマホ二重稼働時の重複実行回避(フェイルオーバー方式)+テスト強化
+
+ユーザー指示「RS-SyncはVPSとスマホの二箇所にインストール予定。どちらかが
+生きていれば、重複しないで稼働させたい」+「Androidスマホにも本体を
+インストールしたい(従来のリモートクライアント方式から変更)」+
+「rs-syncのテスト強化をして」への対応。
+
+1. **排他方式の確認(ユーザー選択)**: VPSを常に優先(primary)、スマホ側
+   インスタンスはVPSの`/healthz`への死活監視で「VPSが不通の間だけ」
+   同期ジョブを代行する片方向フェイルオーバー方式を採用(共有ロック
+   ファイル方式ではなく、追加インフラ不要でシンプルな方を選択)。
+2. **実装**(`src/model.rs`/`src/scheduler.rs`): `AppState`に
+   `primary_healthz_url: Option<String>`
+   (`RS_SYNC_PRIMARY_HEALTHZ_URL`環境変数、VPS側には設定しない・
+   スマホ側インスタンスにのみ設定する運用)を追加。
+   `run_scheduler_loop`の毎分tickの冒頭で、この値が設定されている
+   場合のみ`check_primary_alive()`(3秒タイムアウトの`reqwest::blocking`
+   GET、`spawn_blocking`経由)でVPS側`/healthz`への到達性を確認し、
+   到達できれば`continue`でこのtickのジョブ実行(gitジョブ・フォルダ
+   同期ジョブとも)をまるごとスキップする。VPS不通時のみ通常通り実行する
+   ——ネットワークエラー・非200応答はいずれも「primary不通」(=実行すべき)
+   として安全側(実行する側)に倒す設計。
+3. **Android版の位置づけ変更(今回はサーバー側の土台のみ、Android実装は
+   未着手)**: 従来の「リモートクライアント専用」設計(`open-easy-web`と
+   同様の`ProcessBuilder`起動)から、`open-easy-web`方式(スマホ上で
+   本体〈`cargo ndk`クロスビルド〉を`ProcessBuilder`起動、
+   `RS_SYNC_PRIMARY_HEALTHZ_URL`にVPS側の公開URLを設定)へ変更する方針を
+   ユーザーと確認した。**今回のパスではAndroidアプリ側(`android/`)の
+   改修は未着手**——サーバー側の排他ロジック(上記2.)のみ実装した。
+4. **テスト強化**: `scheduler.rs`に新規`failover_tests`モジュール
+   (実TCPモックサーバーで200/非200/接続不可の3パターンを検証、
+   `check_primary_alive`の回帰テスト3件)。`cargo test --lib`は
+   42→**45件全green**(新規3件、既存42件は無回帰)。
+5. **正直な開示・未着手**: (1) Android側`android/`の「リモート
+   クライアント」から「本体インストール」への設計変更自体(UI・
+   `ProcessBuilder`起動ロジック・`RS_SYNC_PRIMARY_HEALTHZ_URL`環境変数の
+   設定導線)はまだ実装していない——次回セッションでの着手事項。
+   (2) 実際にVPS+スマホの2台構成で、VPS停止時にスマホ側が実際に
+   同期を代行し始めることの実機検証は未実施(ロジック単体のテストのみ)。
+- 次にすべきこと: (1) `android/`をopen-easy-web方式(本体埋め込み・
+  `ProcessBuilder`起動)へ改修、(2) `RS_SYNC_PRIMARY_HEALTHZ_URL`を
+  Android側の設定画面から入力できるようにする、(3) 実機2台
+  (VPS+スマホ)でのフェイルオーバー実地検証。
+
 ## HANDOFF追記(2026-08-07) タブレットエミュレータでsw600dpレイアウト実機検証+実バグ1件発見・修正
 
 前回HANDOFF(2026-08-05)の「次にすべきこと(1) タブレット実機/エミュレータ

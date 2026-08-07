@@ -20,6 +20,28 @@ pub async fn run_scheduler_loop(state: Arc<AppState>) {
         // ハングしようと、このtickだけは1分ごとに必ず更新され続ける。
         *state.scheduler_last_tick.lock().unwrap() = now;
 
+        // 2026-08-07追記(ユーザー指示「VPSとスマホの二箇所にインストール
+        // 予定。どちらかが生きていれば重複しないで稼働させたい」):
+        // `primary_healthz_url`が設定されている(=このインスタンスは
+        // スマホ側のフェイルオーバー役)場合、VPS側`/healthz`へ到達できる
+        // 間はジョブを実行しない——同じジョブが二重に実行され、双方向
+        // 同期のコンフリクト検知や同一リポジトリへの同時pushで無用な
+        // 競合を起こすことを避けるため。到達できない(VPSダウン)場合は
+        // 通常通りこのインスタンスがジョブを実行する。
+        if let Some(url) = &state.primary_healthz_url {
+            let is_primary_alive = {
+                let url = url.clone();
+                tokio::task::spawn_blocking(move || check_primary_alive(&url))
+                    .await
+                    .unwrap_or(false)
+            };
+            if is_primary_alive {
+                tracing::debug!("primary instance ({url}) is alive; skipping scheduler run on this standby instance");
+                continue;
+            }
+            tracing::warn!("primary instance ({url}) is unreachable; running as standby this tick");
+        }
+
         let due_job_ids: Vec<String> = {
             let store = state.store.lock().unwrap();
             store
@@ -107,6 +129,23 @@ async fn check_expiring_tokens(state: Arc<AppState>, now: &chrono::DateTime<Utc>
             state.save();
         });
     }
+}
+
+/// 2026-08-07追記: primaryインスタンスの`/healthz`へ短いタイムアウト
+/// (3秒)で到達確認する。ブロッキングI/O(`reqwest::blocking`)のため
+/// 呼び出し側で`spawn_blocking`すること。ネットワークエラー・非200
+/// 応答はいずれも「primaryは生きていない」(=このインスタンスが
+/// standbyとしてジョブを引き受けるべき)として扱う——安全側(実行する
+/// 側)へ倒す設計。
+fn check_primary_alive(url: &str) -> bool {
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    matches!(client.get(url).send(), Ok(resp) if resp.status().is_success())
 }
 
 fn is_due(job: &crate::model::SyncJob, now: &chrono::DateTime<Utc>) -> bool {
@@ -298,5 +337,55 @@ mod notification_tests {
         assert!(is_auth_failure("SFTP authentication failed for user@host"));
         assert!(!is_auth_failure("repo discovery failed: connection timed out"));
         assert!(!is_auth_failure("2 file(s) copied, 0 unchanged"));
+    }
+}
+
+#[cfg(test)]
+mod failover_tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    /// 2026-08-07追記: VPS/スマホ二重稼働時の重複実行回避
+    /// (`primary_healthz_url`)の回帰テスト。実TCPで200/非200/接続不可の
+    /// 3パターンを起こし、`check_primary_alive`が意図通り真偽を返す
+    /// ことを確認する(モックではなく実際のTCPソケット通信)。
+    fn start_mock_healthz(status_line: &'static str) -> std::net::SocketAddr {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf);
+                let body = "ok";
+                let response = format!(
+                    "HTTP/1.1 {}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    status_line,
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        addr
+    }
+
+    #[test]
+    fn check_primary_alive_returns_true_for_a_real_200_response() {
+        let addr = start_mock_healthz("200 OK");
+        assert!(check_primary_alive(&format!("http://{addr}/healthz")));
+    }
+
+    #[test]
+    fn check_primary_alive_returns_false_for_a_non_success_status() {
+        let addr = start_mock_healthz("503 Service Unavailable");
+        assert!(!check_primary_alive(&format!("http://{addr}/healthz")));
+    }
+
+    #[test]
+    fn check_primary_alive_returns_false_when_nothing_is_listening() {
+        // 127.0.0.1:1(well-known、通常何も待ち受けていない)への接続は
+        // 即座に拒否されるはず——実際にサーバーがダウンしている状況を
+        // 模す。
+        assert!(!check_primary_alive("http://127.0.0.1:1/healthz"));
     }
 }

@@ -134,6 +134,14 @@ pub struct AppState {
     /// 持たないため、`AppState`側にも同じ設定を複製して持つ)。
     pub notify_email: Option<String>,
     pub smtp: Option<crate::mail::SmtpConfig>,
+    /// 2026-08-07追記(ユーザー指示「VPSとスマホの二箇所にインストール
+    /// 予定。どちらかが生きていれば重複しないで稼働させたい」): VPSを
+    /// 常に優先させ、スマホ側インスタンスはこのURL(VPS側の`/healthz`)へ
+    /// 到達できる間はスケジューラのジョブ実行を自身では行わない
+    /// (フェイルオーバー方式、`RS_SYNC_PRIMARY_HEALTHZ_URL`環境変数)。
+    /// VPS側インスタンス自体にはこの変数を設定しない(常に自分が
+    /// primaryとして動くため、`None`のままでよい)。
+    pub primary_healthz_url: Option<String>,
 }
 
 impl AppState {
@@ -150,6 +158,7 @@ impl AppState {
             scheduler_last_tick: Mutex::new(Utc::now()),
             notify_email: std::env::var("RS_SYNC_ADMIN_EMAIL").ok().filter(|s| !s.is_empty()),
             smtp: crate::mail::SmtpConfig::from_env(),
+            primary_healthz_url: std::env::var("RS_SYNC_PRIMARY_HEALTHZ_URL").ok().filter(|s| !s.is_empty()),
         }
     }
 
