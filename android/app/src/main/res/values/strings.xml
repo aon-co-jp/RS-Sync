@@ -20,4 +20,9 @@
     <string name="connect_button">接続 / 疎通確認</string>
     <string name="open_browser_button">🌐 ブラウザで開く(アカウント登録・同期ジョブ管理)</string>
     <string name="server_url_hint">RS-SyncのURL (例: https://easy-web.tokyo/rs-sync)</string>
+
+    <string name="local_server_settings_button">⚙️ この端末で本体を実行する設定</string>
+    <string name="start_local_server_button">🖥️ 本体をこの端末で起動</string>
+    <string name="local_server_settings_title">本体をこの端末で実行(VPSと二重稼働)</string>
+    <string name="local_server_settings_message">有効にすると、以後「本体をこの端末で起動」ボタンで、この端末上でRS-Sync本体(Rust製バイナリ)を直接起動します(従来のリモートクライアント方式ではなく本体を実行)。\n\nVPS側インスタンスのURL(/healthzが返る、例: https://easy-web.tokyo/rs-sync/healthz)を設定すると、VPS側が生きている間はこの端末側は同期ジョブの実行を自動的にスキップし(重複防止)、VPS不通時のみこの端末が代行します。空欄のままにすると、この端末は常に自分で全ジョブを実行します(VPSとの重複が起きうるため、通常は設定を推奨)。</string>
 </resources>

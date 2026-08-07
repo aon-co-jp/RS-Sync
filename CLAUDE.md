@@ -42,6 +42,62 @@ RS-Git/RPoem等と同じ方針: `poem`クレートを直接利用する単純な
   配下にマウントされても壊れないようにするため(open-gitea(現RS-Git)の`/rgit`デプロイ
   で絶対パスfetchが壊れた教訓を踏襲)。
 
+## HANDOFF追記(2026-08-07続き2) Android版を「リモートクライアント」から「本体をこの端末で実行」方式へ拡張(open-easy-web方式のProcessBuilder起動)
+
+前回HANDOFF(続き)の「次にすべきこと(1)」に対応。ユーザーから実際の
+WireGuard固定IP用`.conf`ファイル(LOLIPOP!固定IPアクセス)を受け取り、
+`PersistentKeepalive`が実際に欠落していることを確認・追記した
+(ユーザー側でWireGuardアプリへの再インポートが必要、この修正だけでは
+端末側には反映されない旨を案内済み)。これとは独立に、本項の本体
+(Android版RS-Sync)の拡張を実施。
+
+1. **新規`LocalServerConfig.kt`**: 「本体をこの端末で実行する」機能の
+   有効/無効フラグ(既定無効、後方互換)・VPS側`/healthz`URL
+   (`primaryHealthzUrl`、`RS_SYNC_PRIMARY_HEALTHZ_URL`環境変数として
+   ネイティブプロセスへ渡す)・ローカルポート(既定`18095`)を
+   `SharedPreferences`で保持。
+2. **`MainActivity.kt`拡張**: 新規ボタン「⚙️ この端末で本体を実行する
+   設定」(有効化+VPS `/healthz` URL入力ダイアログ)・「🖥️ 本体をこの
+   端末で起動」を追加。`startLocalServerProcess()`
+   (`open-easy-web/android::startServerProcess()`と同じ
+   `ProcessBuilder`+`jniLibs`同梱パターン、バイナリ名`librssync.so`
+   ——`cargo ndk`でのクロスビルド成果物をこの名前で`jniLibs/<abi>/`へ
+   配置する想定)が、`RS_SYNC_DATA`(端末内`filesDir/rs-sync-data/
+   store.json`)・`RS_SYNC_PORT`(既定18095)・`RS_SYNC_REQUIRE_AUTH=false`
+   (ループバックのみ到達可能なため認証不要、既存の`rs-sync-demo`運用と
+   同じ判断)・`RS_SYNC_PRIMARY_HEALTHZ_URL`(設定されていれば、
+   前回実装した`scheduler.rs`のフェイルオーバーロジックがVPS生存中は
+   この端末の同期ジョブ実行をスキップする)を環境変数として渡して起動する。
+   起動後は自動で`/healthz`疎通確認→成功なら`serverUrlInput`をローカル
+   URLへ切り替えて既存の`startPeriodicPolling()`をそのまま再利用。
+   `onDestroy()`でプロセスを道連れに終了(フォアグラウンドサービス化は
+   今回スコープ外、既存のバックグラウンド常駐化の課題と同じ)。
+3. **既定は無効のまま**(後方互換): 有効化しない限り、従来通り
+   「リモートクライアント」として動作し続ける(既存の`connectButton`/
+   `openBrowserButton`のロジックは無変更)。
+4. **検証**: `gradle :app:compileDebugKotlin`・`:app:assembleDebug`
+   ともに**BUILD SUCCESSFUL**(`--offline`、キャッシュ済みGradle
+   8.11.1使用)。`librssync.so`は未同梱のため`mergeDebugNativeLibs`は
+   `NO-SOURCE`(想定通り)——`binaryPath.exists()`チェックにより、
+   未ビルド状態で起動を試みても「ERROR: native binary not found」と
+   ログへ明示し、黙って失敗しない設計にしてある。
+5. **正直な開示・未着手**: (1) `cargo ndk -t arm64-v8a -t x86_64 build
+   --release --bin rs-sync`での実クロスビルド・`jniLibs`への実配置・
+   実機/エミュレータでの実際の起動確認はいずれも今回未実施
+   (Kotlin側の実装・ビルド成功の確認までに留まる)。(2) VPS+スマホ
+   実機2台での実際のフェイルオーバー動作(VPS停止時にスマホ側が
+   代行開始すること)の実地検証も未実施。(3) `open-easy-web`と異なり
+   RS-Syncは固定アカウント制の認証を持たないため`OPEN_EASYWEB_
+   FIXED_ACCOUNT_EMAIL`相当の必須環境変数チェックは不要——代わりに
+   `RS_SYNC_REQUIRE_AUTH=false`で認証自体を無効化する設計とした
+   (ループバックのみ到達可能なため実害は低いと判断、正直な開示として
+   明記)。
+- 次にすべきこと: (1) `cargo ndk`での実クロスビルド+`librssync.so`を
+  `jniLibs/{arm64-v8a,x86_64}/`へ配置、(2) 実機/エミュレータでの
+  「本体をこの端末で起動」ボタンの実タップ確認、(3) VPS+スマホ実機
+  2台でのフェイルオーバー実地検証、(4) WireGuard `.conf`修正後、
+  実際に外部からアクセス可能になったかのユーザー確認待ち。
+
 ## HANDOFF追記(2026-08-07続き) VPS/スマホ二重稼働時の重複実行回避(フェイルオーバー方式)+テスト強化
 
 ユーザー指示「RS-SyncはVPSとスマホの二箇所にインストール予定。どちらかが

@@ -9,10 +9,14 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import java.io.BufferedReader
+import java.io.File
+import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.CoroutineScope
@@ -28,11 +32,21 @@ import kotlinx.coroutines.withContext
  * `aruaru-db/android/`と同じ電源プロファイル・BroadcastReceiverパターンを
  * 踏襲)。
  *
- * **重要な位置づけ**: このActivityはRS-Sync本体(Rust製のGitホスティング
- * 間ミラー同期・フォルダ同期サーバー、日英2言語WebUI)をAndroid上で
- * 実行するものではない。ユーザーが入力したリモートURL(既存のRS-Sync
- * インスタンス、`GET /healthz`)へHTTPで接続し疎通確認を行い、実際の
- * アカウント登録・同期ジョブ作成・実行操作は「ブラウザで開く」ボタンで
+ * **位置づけ(2026-08-07更新)**: 従来このActivityはRS-Sync本体を
+ * Android上で実行しない「リモートクライアント」専用設計だった
+ * (ユーザーが入力したリモートURLへ`GET /healthz`で疎通確認するのみ)。
+ * ユーザー指示「VPSとスマホの二箇所にインストールしたい」を受け、
+ * `open-easy-web/android`と同じ「本体(Rust製バイナリ)を
+ * `ProcessBuilder`でこの端末上に直接起動する」方式を追加した
+ * (`LocalServerConfig`参照)。**既定は無効のまま**——設定で明示的に
+ * 有効化しない限り、従来通りリモートクライアントとして動作する
+ * (後方互換)。本体を起動する場合は`RS_SYNC_PRIMARY_HEALTHZ_URL`に
+ * VPS側の`/healthz`を設定することで、`src/scheduler.rs`側の
+ * フェイルオーバーロジック(2026-08-07実装)によりVPSが生きている間は
+ * この端末側が同期ジョブを重複実行しない。
+ *
+ * 実際のアカウント登録・同期ジョブ作成・実行操作は、本体をこの端末で
+ * 起動した場合・リモート接続の場合いずれも「ブラウザで開く」ボタンで
  * 外部ブラウザ(既存のWebUI)に委ねる(open-redmine/open-easy-web版と
  * 同じ「ネイティブUIを再実装しない」設計判断)。
  *
@@ -61,6 +75,7 @@ class MainActivity : AppCompatActivity() {
     private var pollJob: Job? = null
     private var powerConnectionReceiver: BroadcastReceiver? = null
     private lateinit var currentProfile: PowerProfile
+    private var localServerProcess: Process? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,6 +90,8 @@ class MainActivity : AppCompatActivity() {
         val connectButton = findViewById<Button>(R.id.connectButton)
         val openBrowserButton = findViewById<Button>(R.id.openBrowserButton)
         val changeProfileButton = findViewById<Button>(R.id.changeProfileButton)
+        val localServerSettingsButton = findViewById<Button>(R.id.localServerSettingsButton)
+        val startLocalServerButton = findViewById<Button>(R.id.startLocalServerButton)
 
         serverUrlInput.setText(PowerProfile.loadServerUrl(this))
         statusText.text = "RS-Sync [${currentProfile.emoji} ${currentProfile.label}モード] (未接続)"
@@ -121,7 +138,150 @@ class MainActivity : AppCompatActivity() {
             finish()
         }
 
+        localServerSettingsButton.setOnClickListener {
+            showLocalServerSettingsDialog()
+        }
+
+        startLocalServerButton.setOnClickListener {
+            if (!LocalServerConfig.isEnabled(this)) {
+                Toast.makeText(
+                    this,
+                    "先に「本体を実行する設定」でVPSとの二重稼働を有効化してください",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@setOnClickListener
+            }
+            startLocalServerButton.isEnabled = false
+            CoroutineScope(Dispatchers.Main).launch {
+                val log = StringBuilder()
+                log.appendLine("profile: ${currentProfile.label} (${currentProfile.prefValue})")
+                statusText.text = "[${currentProfile.emoji} ${currentProfile.label}] starting local server..."
+                val started = withContext(Dispatchers.IO) { startLocalServerProcess(log) }
+                logText.text = log.toString()
+                if (!started) {
+                    statusText.text = "[${currentProfile.emoji} ${currentProfile.label}] failed to start (see log)"
+                    startLocalServerButton.isEnabled = true
+                    return@launch
+                }
+                applyProfilePowerBehavior(log)
+                val baseUrl = LocalServerConfig.localBaseUrl(this@MainActivity)
+                val healthOk = withContext(Dispatchers.IO) { checkHealth(baseUrl, log) }
+                logText.text = log.toString()
+                statusText.text = if (healthOk) {
+                    "[${currentProfile.emoji} ${currentProfile.label}] RUNNING (local, port ${LocalServerConfig.getLocalPort(this@MainActivity)})"
+                } else {
+                    "[${currentProfile.emoji} ${currentProfile.label}] started but /healthz did not respond yet (see log)"
+                }
+                if (healthOk) {
+                    serverUrlInput.setText(baseUrl)
+                    PowerProfile.saveServerUrl(this@MainActivity, baseUrl)
+                    startPeriodicPolling(baseUrl, statusText, logText)
+                }
+                startLocalServerButton.isEnabled = true
+            }
+        }
+
         registerPowerConnectionReceiver()
+    }
+
+    /**
+     * 有効化・VPS側`/healthz`URL(任意)を設定するダイアログ。
+     * `AlertDialog`+動的生成した`EditText`2つの単純なフォーム
+     * (open-easy-web/androidの各種設定ダイアログと同じ構成パターン)。
+     */
+    private fun showLocalServerSettingsDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 24, 48, 0)
+        }
+        val healthzInput = EditText(this).apply {
+            hint = "https://easy-web.tokyo/rs-sync/healthz"
+            setText(LocalServerConfig.getPrimaryHealthzUrl(this@MainActivity).orEmpty())
+        }
+        container.addView(healthzInput)
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.local_server_settings_title)
+            .setMessage(R.string.local_server_settings_message)
+            .setView(container)
+            .setPositiveButton("有効化して保存") { _, _ ->
+                LocalServerConfig.setEnabled(this, true)
+                LocalServerConfig.setPrimaryHealthzUrl(this, healthzInput.text.toString())
+                Toast.makeText(this, "本体実行モードを有効化しました", Toast.LENGTH_SHORT).show()
+            }
+            .setNeutralButton("無効化に戻す") { _, _ ->
+                LocalServerConfig.setEnabled(this, false)
+                Toast.makeText(this, "リモートクライアントモードに戻しました", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("キャンセル", null)
+            .show()
+    }
+
+    /**
+     * RS-Sync本体(Rust製バイナリ、`cargo ndk`でクロスビルドし
+     * `jniLibs/<abi>/librssync.so`として同梱する想定)を`ProcessBuilder`で
+     * 起動する(`open-easy-web/android::startServerProcess()`と同じ
+     * パターン)。**正直な開示**: このメソッド自体はopen-easy-web版の
+     * 確立済み実装パターンに倣って書かれているが、`librssync.so`の
+     * 実クロスビルド・実機/エミュレータでの起動確認はこのパスでは
+     * 未実施——`binaryPath.exists()`チェックにより、未ビルドの状態で
+     * 起動を試みても黙って失敗せず理由をログへ明示する設計にしてある。
+     */
+    private fun startLocalServerProcess(log: StringBuilder): Boolean {
+        return try {
+            val binaryPath = File(applicationInfo.nativeLibraryDir, "librssync.so")
+            log.appendLine("binary path: ${binaryPath.absolutePath}")
+            log.appendLine("binary exists: ${binaryPath.exists()}")
+            if (!binaryPath.exists()) {
+                log.appendLine(
+                    "ERROR: native binary not found — this build was not produced with " +
+                        "'cargo ndk ... build --bin rs-sync' output copied into jniLibs/<abi>/librssync.so"
+                )
+                return false
+            }
+
+            val dataDir = File(filesDir, "rs-sync-data")
+            dataDir.mkdirs()
+            val port = LocalServerConfig.getLocalPort(this)
+            val primaryHealthzUrl = LocalServerConfig.getPrimaryHealthzUrl(this)
+
+            val pb = ProcessBuilder(binaryPath.absolutePath)
+            pb.directory(filesDir)
+            pb.environment()["RS_SYNC_DATA"] = File(dataDir, "store.json").absolutePath
+            pb.environment()["RS_SYNC_PORT"] = port.toString()
+            // このAndroid端末上のインスタンスへブラウザ以外から到達する
+            // 経路が無いため(ループバックのみ)、認証は要求しない——
+            // VPS本番とは異なる前提(既存のrs-sync-demo運用と同様の判断)。
+            pb.environment()["RS_SYNC_REQUIRE_AUTH"] = "false"
+            if (!primaryHealthzUrl.isNullOrBlank()) {
+                pb.environment()["RS_SYNC_PRIMARY_HEALTHZ_URL"] = primaryHealthzUrl
+                log.appendLine("failover: will defer to primary at $primaryHealthzUrl when reachable")
+            } else {
+                log.appendLine("failover: no primary healthz URL configured — this device always runs all jobs")
+            }
+            pb.redirectErrorStream(true)
+            val process = pb.start()
+            localServerProcess = process
+
+            Thread {
+                try {
+                    BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
+                        var line: String?
+                        while (reader.readLine().also { line = it } != null) {
+                            android.util.Log.i("rs-sync", line ?: "")
+                        }
+                    }
+                } catch (_: Exception) {
+                    // プロセス終了時にストリームが閉じるのは正常系。
+                }
+            }.start()
+
+            log.appendLine("process started (alive=${process.isAlive}), port=$port")
+            true
+        } catch (e: Exception) {
+            log.appendLine("ERROR launching process: $e")
+            false
+        }
     }
 
     private fun resolveProfile(): PowerProfile {
@@ -291,6 +451,10 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         pollJob?.cancel()
+        // Activity終了時に本体プロセスを道連れにする(バックグラウンド
+        // 常駐サービス化は今回のスコープ外——open-easy-web版と同様、
+        // フォアグラウンドサービス化は次回課題として明記)。
+        localServerProcess?.let { if (it.isAlive) it.destroy() }
         powerConnectionReceiver?.let {
             try {
                 unregisterReceiver(it)

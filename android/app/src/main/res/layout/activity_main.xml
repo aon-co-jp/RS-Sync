@@ -42,6 +42,20 @@
         android:layout_marginTop="8dp"
         android:text="@string/change_profile_button" />
 
+    <Button
+        android:id="@+id/localServerSettingsButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/local_server_settings_button" />
+
+    <Button
+        android:id="@+id/startLocalServerButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/start_local_server_button" />
+
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
