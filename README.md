@@ -48,6 +48,22 @@ over HTTP(S), so any provider that speaks git smart-HTTP will work for the
 actual sync even where the REST adapter above is unverified; only repo
 discovery/creation depends on the adapter.
 
+## Recent updates (2026-08-07)
+
+- **VPS/phone duplicate-run avoidance (failover)**: set
+  `RS_SYNC_PRIMARY_HEALTHZ_URL` on a secondary instance (e.g. a phone) to
+  the primary instance's (e.g. a VPS) `/healthz` URL. The scheduler skips
+  its own job execution for a tick whenever the primary responds; it only
+  runs jobs itself when the primary is unreachable. See `src/scheduler.rs`.
+- **Android app: local-server mode (new, not yet cross-compiled)**: the
+  Android client can now optionally run the RS-Sync binary directly on the
+  device (`ProcessBuilder`, mirroring `open-easy-web`'s pattern) instead of
+  only acting as a remote client. Disabled by default. See
+  `android/.../LocalServerConfig.kt`. **Honest gap**: the native binary
+  (`librssync.so`, built via `cargo ndk`) has not been cross-compiled or
+  placed into `jniLibs/` in this pass — the Kotlin code builds
+  successfully but on-device startup is unverified.
+
 ## What is NOT implemented yet (documented honestly)
 
 - Webhook-based realtime detection — only polling is implemented.
@@ -143,6 +159,21 @@ Gitbucket)間でリポジトリを同期・バックアップするWebアプリ�
 いるGitea/GitBucket/open-gitea(あるいはセルフホスト版GitLab/Bitbucket)
 も、そのURLをAPI base/git baseに指定するだけで既存のプロバイダとして
 そのまま登録できる。
+
+### 最近の更新(2026-08-07)
+
+- **VPS/スマホ二重稼働時の重複実行回避(フェイルオーバー方式)**: 副系
+  (スマホ等)に`RS_SYNC_PRIMARY_HEALTHZ_URL`環境変数を設定し、主系
+  (VPS等)の`/healthz` URLを指すと、主系が生きている間は副系側の
+  スケジューラがそのtickでのジョブ実行をスキップする。主系が不通の
+  ときのみ副系が実行を代行する(`src/scheduler.rs`参照)。
+- **Android版に「本体をこの端末で実行」機能を新設(未クロスビルド)**:
+  従来の「リモートクライアント専用」設計に加え、`open-easy-web`と同じ
+  `ProcessBuilder`方式で本体(Rustバイナリ)を端末上で直接起動できる
+  ようにした(既定は無効、`android/.../LocalServerConfig.kt`参照)。
+  **正直な開示**: `cargo ndk`でのネイティブバイナリ(`librssync.so`)の
+  実クロスビルド・`jniLibs`への配置は今回未実施——Kotlin側のビルド
+  成功までの確認に留まる。
 
 ### 未実装(正直な開示)
 
