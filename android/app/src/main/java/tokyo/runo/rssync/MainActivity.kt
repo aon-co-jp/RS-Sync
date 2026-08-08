@@ -165,7 +165,18 @@ class MainActivity : AppCompatActivity() {
                 }
                 applyProfilePowerBehavior(log)
                 val baseUrl = LocalServerConfig.localBaseUrl(this@MainActivity)
-                val healthOk = withContext(Dispatchers.IO) { checkHealth(baseUrl, log) }
+                // 2026-08-07実機検証で発見した実バグ: プロセス起動直後は
+                // poemサーバーがまだリスンソケットをbindし終えていないことが
+                // あり、単発の疎通確認だと`Connection refused`で即座に
+                // 失敗していた(open-easy-webの`pollHealthz()`と異なり
+                // リトライが無かった)。起動直後の数秒だけ短間隔で
+                // リトライする猶予を追加。
+                var healthOk = false
+                for (attempt in 1..5) {
+                    healthOk = withContext(Dispatchers.IO) { checkHealth(baseUrl, log) }
+                    if (healthOk) break
+                    if (attempt < 5) delay(1000)
+                }
                 logText.text = log.toString()
                 statusText.text = if (healthOk) {
                     "[${currentProfile.emoji} ${currentProfile.label}] RUNNING (local, port ${LocalServerConfig.getLocalPort(this@MainActivity)})"
