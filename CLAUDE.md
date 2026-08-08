@@ -42,6 +42,52 @@ RS-Git/RPoem等と同じ方針: `poem`クレートを直接利用する単純な
   配下にマウントされても壊れないようにするため(open-gitea(現RS-Git)の`/rgit`デプロイ
   で絶対パスfetchが壊れた教訓を踏襲)。
 
+## HANDOFF追記(2026-08-07続き3) `ssh2`(OpenSSL依存)→`russh`/`russh-sftp`(pure Rust)への置き換え完了、Androidクロスビルド阻害要因を解消
+
+ユーザー指示「ssh2をpure-Rust実装(russh等)へ置き換える設計変更をやって」への
+対応。前回HANDOFF(続き2)で「Android版の`cargo ndk`クロスビルドが
+`ssh2`→`openssl-sys`のFFI依存で失敗する」と記録した根本原因を解消した。
+
+1. **`SftpBackend`を`ssh2`から`russh`+`russh-keys`+`russh-sftp`
+   (いずれもpure Rust、`open-web-server`側`sftp.rs`が既に実機検証済みの
+   同一バージョン組み合わせ〈0.45系/2系〉を再利用)へ全面書き換え**
+   (`src/folder_sync.rs`)。`SmbBackend`と同じ「使い捨てtokio
+   ランタイム(`new_current_thread`)を保持しblock_onで同期traitへ
+   変換する」パターンを踏襲。ホスト鍵検証は行わない
+   (`TrustAnyServerKey`、旧`ssh2::Session::handshake()`も同様に検証
+   していなかったため後退ではない、正直な開示としてコード内docに明記)。
+2. **実装中に発見・修正した実バグ**: `russh_sftp::client::SftpSession::
+   write()`は`OpenFlags::WRITE`のみでファイルを開くため、**新規ファイル
+   の作成ができない**(既存ファイルの上書きのみ可能)——`write_file`で
+   これを直接使うと新規アップロードが常に`No such file`で失敗する。
+   `create()`(`CREATE|TRUNCATE|WRITE`)経由の`File`(`AsyncWrite`実装)へ
+   `write_all`+`shutdown`する方式に修正して解消。
+3. **デバッグで踏んだ環境固有の罠(教訓として明記)**: 実VPS
+   (conoha、`160.251.237.162`)に対する`#[ignore]`統合テストを
+   Git Bash経由で実行した際、`RS_SYNC_TEST_SFTP_REMOTE_PATH=/tmp/...`
+   という環境変数値がMSYSの自動パス変換で
+   `C:/Users/.../AppData/Local/Temp/...`のようなWindowsパスへ書き換え
+   られ、一見コードのバグに見える別の失敗(`No such file`)を引き起こした
+   ——`MSYS_NO_PATHCONV=1`を付けて解消(このエコシステムで過去にも
+   繰り返し記録されている既知の罠パターンと同種)。
+4. **検証(実測)**: `cargo test --lib`45件全green(回帰無し)。
+   実VPS(conoha)に対する`local_to_sftp_and_back_round_trips_against_a_
+   real_vps`(`--ignored`)を`MSYS_NO_PATHCONV=1`付きで実行し、
+   **実際に新しいrusshバックエンド経由でlocal→VPS(SFTP新規アップ
+   ロード)→別ローカルディレクトリ(SFTP読み取り)の往復が成功する
+   ことを実機で確認**(修正前は新規アップロードが上記2.のバグで
+   必ず失敗していた)。検証用の一時ファイル・ディレクトリは
+   `ssh conoha "rm -rf /tmp/rs-sync-russh-test"`で後片付け済み。
+5. **`cargo ndk`でのAndroidクロスビルド**: `ssh2`除去により
+   `openssl-sys`がAndroidターゲットの依存グラフから消えたはずのため、
+   `cargo ndk -t arm64-v8a -t x86_64 build --release --bin rs-sync`を
+   再実行(結果は本エントリ執筆時点で実行中、次のHANDOFF追記で結果を
+   記録する)。
+- 次にすべきこと: (1) `cargo ndk`クロスビルドの成功確認、(2) 成功したら
+  `librssync.so`を`jniLibs/{arm64-v8a,x86_64}/`へ配置しAPKビルド・
+  実機インストール・起動確認、(3) VPS+スマホ実機2台でのフェイル
+  オーバー実地検証。
+
 ## HANDOFF追記(2026-08-07続き2) Android版を「リモートクライアント」から「本体をこの端末で実行」方式へ拡張(open-easy-web方式のProcessBuilder起動)
 
 前回HANDOFF(続き)の「次にすべきこと(1)」に対応。ユーザーから実際の

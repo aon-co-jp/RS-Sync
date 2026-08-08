@@ -34,7 +34,6 @@
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -172,57 +171,110 @@ impl FolderBackend for LocalBackend {
 /// `no such file`で失敗する実バグがあった(2026-08-03、実VPSでの検証で発見)。
 /// 常に`/`区切りの文字列として手動結合してから`Path`化することで、
 /// ホストOSに関わらずリモート側のパスを正しく組み立てる。
-fn join_unix_path(base: &Path, rel: &Path) -> PathBuf {
-    let base_str = base.to_string_lossy().replace('\\', "/");
-    let rel_str = rel.to_string_lossy().replace('\\', "/");
-    if rel_str.is_empty() {
-        return PathBuf::from(base_str);
+/// クライアント側の`check_server_key`(TOFU無し、常時信頼)。
+/// `open-web-server`側`sftp.rs`のテスト用ハンドラと同じ位置づけだが、
+/// あちらはテスト専用なのに対し、こちらは本番のフォルダ同期クライアント
+/// そのものに使う——**正直な開示**: ホスト鍵検証を行わないため、
+/// 経路上の中間者攻撃に対する防御は無い(既存の`ssh2`実装も
+/// `Session::handshake()`だけでは同様にホスト鍵を検証していなかった
+/// ため、セキュリティ特性の後退ではない。将来`known_hosts`相当の
+/// 検証を追加する余地がある)。
+struct TrustAnyServerKey;
+
+#[async_trait::async_trait]
+impl russh::client::Handler for TrustAnyServerKey {
+    type Error = russh::Error;
+
+    async fn check_server_key(&mut self, _server_public_key: &russh_keys::key::PublicKey) -> Result<bool, Self::Error> {
+        Ok(true)
     }
-    let base_trimmed = base_str.trim_end_matches('/');
-    PathBuf::from(format!("{base_trimmed}/{rel_str}"))
 }
 
+/// SFTPバックエンド(2026-08-07、`ssh2`〈libssh2 FFIバインディング〉から
+/// pure-Rust実装の`russh`+`russh-sftp`へ置き換え——open-web-serverの
+/// `sftp.rs`(組み込みSFTPサーバー)が既に実機検証済みの同じクレート
+/// 組み合わせを再利用する。`ssh2`はOpenSSL(`openssl-sys`)へのFFI依存を
+/// 持ち、これがRS-Sync本体のAndroidクロスビルド(`cargo ndk`)を阻害して
+/// いた(Android向けにOpenSSLを別途クロスビルドする必要があり、
+/// `reqwest`/`lettre`は既にrustls-tlsへ統一済みだったのに対しSFTP経路
+/// だけがこの制約を引きずっていた)。`russh`/`russh-sftp`はいずれも
+/// pure Rust実装のため、この制約が解消される。
+///
+/// `russh_sftp::client::SftpSession`は`&self`のメソッドのみを要求する
+/// ため(`SmbBackend`のような`Mutex`での内部可変性は不要)、使い捨て
+/// tokioランタイム(`SmbBackend`と同じ「同期traitの中でblock_on」
+/// パターン)+`SftpSession`本体の保持のみで足りる。
 struct SftpBackend {
-    sftp: ssh2::Sftp,
-    base: PathBuf,
-    /// TCP接続+セッションは`sftp`が内部で借用しているため、drop順を
-    /// 保証するためだけに保持する(接続自体は`sftp`経由でのみ使う)。
-    _session: ssh2::Session,
+    runtime: tokio::runtime::Runtime,
+    sftp: russh_sftp::client::SftpSession,
+    base: String,
 }
 
 impl SftpBackend {
     fn connect(endpoint: &FolderEndpoint) -> Result<Self> {
-        let tcp = std::net::TcpStream::connect((endpoint.host.as_str(), endpoint.port))
-            .with_context(|| format!("TCP connect to {}:{}", endpoint.host, endpoint.port))?;
-        let mut session = ssh2::Session::new().context("create ssh2 session")?;
-        session.set_tcp_stream(tcp);
-        session.handshake().context("ssh handshake")?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("build tokio runtime for SFTP connection")?;
 
-        if !endpoint.private_key_path.is_empty() {
-            session
-                .userauth_pubkey_file(&endpoint.username, None, Path::new(&endpoint.private_key_path), None)
-                .context("ssh pubkey auth")?;
-        } else {
-            session.userauth_password(&endpoint.username, &endpoint.password).context("ssh password auth")?;
-        }
-        if !session.authenticated() {
-            return Err(anyhow!("SFTP authentication failed for {}@{}", endpoint.username, endpoint.host));
-        }
-        let sftp = session.sftp().context("open sftp channel")?;
-        Ok(Self { sftp, base: PathBuf::from(&endpoint.path), _session: session })
+        let endpoint = endpoint.clone();
+        let sftp = runtime.block_on(async move {
+            let config = std::sync::Arc::new(russh::client::Config::default());
+            let addr = (endpoint.host.as_str(), endpoint.port);
+            let mut handle = russh::client::connect(config, addr, TrustAnyServerKey)
+                .await
+                .with_context(|| format!("SSH connect to {}:{}", endpoint.host, endpoint.port))?;
+
+            let authenticated = if !endpoint.private_key_path.is_empty() {
+                let key_pair = russh_keys::load_secret_key(&endpoint.private_key_path, None)
+                    .with_context(|| format!("load SSH private key from {}", endpoint.private_key_path))?;
+                handle
+                    .authenticate_publickey(&endpoint.username, std::sync::Arc::new(key_pair))
+                    .await
+                    .context("ssh pubkey auth request")?
+            } else {
+                handle
+                    .authenticate_password(&endpoint.username, &endpoint.password)
+                    .await
+                    .context("ssh password auth request")?
+            };
+            if !authenticated {
+                return Err(anyhow!("SFTP authentication failed for {}@{}", endpoint.username, endpoint.host));
+            }
+
+            let channel = handle.channel_open_session().await.context("open SSH channel")?;
+            channel.request_subsystem(true, "sftp").await.context("request sftp subsystem")?;
+            let sftp = russh_sftp::client::SftpSession::new(channel.into_stream())
+                .await
+                .context("SFTP protocol handshake")?;
+            Ok::<_, anyhow::Error>(sftp)
+        })?;
+
+        Ok(Self { runtime, sftp, base: endpoint.path.trim_end_matches('/').to_string() })
     }
 
-    fn walk(&self, dir: &Path, out: &mut Vec<FileMeta>) -> Result<()> {
-        for (path, stat) in self.sftp.readdir(dir)? {
-            let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            if name == "." || name == ".." {
-                continue;
-            }
-            if stat.is_dir() {
+    fn remote_path(&self, rel_path: &Path) -> String {
+        let rel = rel_path.to_string_lossy().replace('\\', "/");
+        if self.base.is_empty() {
+            rel
+        } else if rel.is_empty() {
+            self.base.clone()
+        } else {
+            format!("{}/{}", self.base, rel)
+        }
+    }
+
+    fn walk(&self, dir: &str, out: &mut Vec<FileMeta>) -> Result<()> {
+        let entries = self.runtime.block_on(self.sftp.read_dir(dir))?;
+        let base_prefix = format!("{}/", self.base);
+        for entry in entries {
+            let path = entry.path();
+            let metadata = entry.metadata();
+            if metadata.is_dir() {
                 self.walk(&path, out)?;
-            } else if stat.is_file() {
-                let rel = path.strip_prefix(&self.base).unwrap_or(&path).to_path_buf();
-                out.push(FileMeta { rel_path: rel, size: stat.size.unwrap_or(0) });
+            } else {
+                let rel = path.strip_prefix(&base_prefix).unwrap_or(&path);
+                out.push(FileMeta { rel_path: PathBuf::from(rel), size: metadata.len() });
             }
         }
         Ok(())
@@ -237,31 +289,36 @@ impl FolderBackend for SftpBackend {
     }
 
     fn read_file(&self, rel_path: &Path) -> Result<Vec<u8>> {
-        let mut file = self.sftp.open(&join_unix_path(&self.base, rel_path))?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-        Ok(buf)
+        Ok(self.runtime.block_on(self.sftp.read(self.remote_path(rel_path)))?)
     }
 
     fn write_file(&self, rel_path: &Path, data: &[u8]) -> Result<()> {
-        let dest = join_unix_path(&self.base, rel_path);
+        let dest = self.remote_path(rel_path);
         // 親ディレクトリを1階層ずつ作成(既存でもエラーを無視、SFTPには
-        // `mkdir -p`相当が無いため)。`acc`も常に`/`区切りで組み立てる
-        // (`join_unix_path`と同じ理由、Windows開発機での実バグ修正済み)。
-        let mut acc = self.base.clone();
-        if let Some(parent) = dest.parent() {
+        // `mkdir -p`相当が無いため——`ssh2`版から踏襲した挙動)。
+        if let Some(parent) = Path::new(&dest).parent() {
+            let mut acc = self.base.clone();
             for component in parent.strip_prefix(&self.base).unwrap_or(parent).components() {
-                acc = join_unix_path(&acc, Path::new(&component));
-                let _ = self.sftp.mkdir(&acc, 0o755);
+                let name = component.as_os_str().to_string_lossy();
+                acc = if acc.is_empty() { name.to_string() } else { format!("{acc}/{name}") };
+                let _ = self.runtime.block_on(self.sftp.create_dir(acc.clone()));
             }
         }
-        let mut file = self.sftp.create(&dest)?;
-        file.write_all(data)?;
+        // `SftpSession::write()`は`OpenFlags::WRITE`のみで開くため
+        // ファイルが既存でないと`No such file`になる(発見した実バグ)。
+        // `create()`(`CREATE|TRUNCATE|WRITE`)経由で新規作成にも対応する。
+        self.runtime.block_on(async {
+            use tokio::io::AsyncWriteExt;
+            let mut file = self.sftp.create(dest).await?;
+            file.write_all(data).await?;
+            file.shutdown().await?;
+            Ok::<_, anyhow::Error>(())
+        })?;
         Ok(())
     }
 
     fn stat(&self, rel_path: &Path) -> Option<u64> {
-        self.sftp.stat(&join_unix_path(&self.base, rel_path)).ok().and_then(|s| s.size)
+        self.runtime.block_on(self.sftp.metadata(self.remote_path(rel_path))).ok().map(|m| m.len())
     }
 }
 
