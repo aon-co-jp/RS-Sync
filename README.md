@@ -115,6 +115,11 @@ Account tokens are stored only in `data/store.json` (gitignored) or, on the
 VPS, under the deployed app's data directory outside of any git repo. Tokens
 and hostnames are never written into commits, README, or CLAUDE.md.
 
+Token fields are automatically trimmed of leading/trailing whitespace and
+newlines (both client-side and server-side, 2026-08-12) — this matters
+because pasting a GitHub PAT often carries a stray trailing newline, which
+GitHub's API rejects with a bare `401 Unauthorized` (not a scope error).
+
 ---
 
 ## 日本語
@@ -136,6 +141,10 @@ Gitbucket)間でリポジトリを同期・バックアップするWebアプリ�
 
 - アカウント登録(ソース/宛先、プロバイダ種別、API/gitのベースURL、
   owner、トークン)—— `data/store.json`(gitignore対象)にのみ保存。
+  トークン欄はコピペ時に紛れ込む前後の空白・改行を自動的に除去する
+  (クライアント側・サーバー側の両方、2026-08-12)——GitHub PATに
+  余分な改行が付いたままだとGitHub側は資格情報として無効と判断し、
+  スコープ不足の`403`ではなく`401 Unauthorized`を返す。
 - 同期ジョブ設定(ソース→宛先、一方向/双方向、対象リポジトリ)。
 - スケジュール(何時間ごと・曜日+時刻・リアルタイムポーリング間隔の
   組み合わせ)。バックグラウンドで毎分チェックし該当ジョブを実行。

@@ -536,7 +536,9 @@ async function updateAccountToken(id){
   const resultEl = document.getElementById("tok-result-"+id);
   try {
     const expiresAt = expInput.value ? new Date(expInput.value + "T00:00:00Z").toISOString() : null;
-    await api("api/accounts/"+id, {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({token: input.value, token_expires_at: expiresAt})});
+    // 実バグ修正(2026-08-12): クイック設定フォームと同じtrim()漏れ
+    // (コピペ時の前後の空白/改行がGitHub側で401 Unauthorizedを招く)。
+    await api("api/accounts/"+id, {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({token: input.value.trim(), token_expires_at: expiresAt})});
     input.value = "";
     expInput.value = "";
     resultEl.textContent = dict[lang].tokenUpdated;
@@ -653,9 +655,10 @@ async function resolveConflict(id, repo){ await api(`api/jobs/${id}/resolve/${en
 document.getElementById("accForm").onsubmit = async (e)=>{
   e.preventDefault();
   const f = new FormData(e.target);
+  // 実バグ修正(2026-08-12): クイック設定フォームと同じtrim()漏れ。
   await api("api/accounts", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
     id:"", name:f.get("name"), provider:f.get("provider"), api_base:f.get("api_base"),
-    git_base:f.get("git_base"), owner:f.get("owner"), token:f.get("token")
+    git_base:f.get("git_base"), owner:f.get("owner"), token:(f.get("token")||"").trim()
   })});
   e.target.reset(); renderAll();
 };
@@ -743,11 +746,15 @@ document.getElementById("quickForm").onsubmit = async (e) => {
   resultEl.textContent = lang === "ja" ? "作成中..." : "Creating...";
   try {
     const masterOwner = parseGithubOwner(document.getElementById("quick-master-url").value);
-    const masterToken = document.getElementById("quick-master-token").value;
+    // 実バグ修正(2026-08-12): トークン欄がtrim()されておらず、コピペ時に
+    // 紛れ込む前後の空白/改行がそのままGitHub APIへ送られると、GitHub側は
+    // 有効なトークン形式として認識できず401 Unauthorizedで拒否する
+    // (スコープ不足の403とは異なり、資格情報そのものが無効という扱い)。
+    const masterToken = document.getElementById("quick-master-token").value.trim();
     const destRows = Array.from(document.querySelectorAll(".quick-dest-row"))
       .map(row => ({
         owner: parseGithubOwner(row.querySelector(".quick-dest-url").value),
-        token: row.querySelector(".quick-dest-token").value,
+        token: row.querySelector(".quick-dest-token").value.trim(),
       }))
       .filter(d => d.owner);
     if (!masterOwner) throw new Error(lang === "ja" ? "マスターのURL/組織名を入力してください。" : "Please enter the master URL/org name.");

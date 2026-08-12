@@ -104,6 +104,14 @@ fn list_accounts(state: Data<&Arc<AppState>>) -> Json<Vec<AccountView>> {
 #[handler]
 fn create_account(state: Data<&Arc<AppState>>, Json(mut acc): Json<Account>) -> Json<AccountView> {
     acc.id = model::new_id();
+    // 実バグ修正(2026-08-12、ユーザー報告「401 Unauthorized」への対応):
+    // トークン欄はクライアント側(static/index.html)で.trim()するよう
+    // 修正したが、Android版アプリやAPI直接呼び出し等、他のクライアント
+    // 経由でも確実に効くよう、サーバー側でも防御的にtrimする。コピペ時に
+    // 紛れ込む前後の空白/改行がそのままGitHub APIへ送られると、GitHub
+    // 側は資格情報として無効と判断し401を返す(スコープ不足の403とは
+    // 異なる)。
+    acc.token = acc.token.trim().to_string();
     let view = AccountView::from(&acc);
     {
         let mut store = state.store.lock().unwrap();
@@ -151,7 +159,9 @@ fn update_account_token(
     let Some(acc) = store.accounts.iter_mut().find(|a| a.id == id) else {
         return error_response(StatusCode::NOT_FOUND, "account not found");
     };
-    acc.token = body.token;
+    // 実バグ修正(2026-08-12): create_accountと同じ防御的trim(コピペ時の
+    // 前後の空白/改行によるGitHub 401 Unauthorizedを防ぐ)。
+    acc.token = body.token.trim().to_string();
     acc.token_expires_at = body.token_expires_at;
     // トークンを更新したら、古い期限に対する警告済みフラグをリセットする
     // (新しいトークン/新しい期限に対して、また期限が近づいたら通知すべきため)。
@@ -701,6 +711,52 @@ mod tests {
             .send()
             .await;
         missing_resp.assert_status(StatusCode::NOT_FOUND);
+    }
+
+    /// 2026-08-12追記(ユーザー報告「同期ジョブでERROR: 401
+    /// Unauthorized」への対応): コピペ時に紛れ込む前後の空白/改行付きの
+    /// トークンを送っても、サーバー側で自動的にtrimされ、GitHub APIへは
+    /// 素のトークンのみが渡ることの回帰確認。`create_account`・
+    /// `update_account_token`の両経路を検証する。
+    #[tokio::test]
+    async fn account_tokens_are_trimmed_of_surrounding_whitespace_on_create_and_update() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, auth_state) = make_state(&tmp, true);
+        let token = auth_state.auth.create_session("admin@example.com");
+        let state_for_inspection = state.clone();
+        let app = build_app(state, auth_state);
+        let client = TestClient::new(app);
+
+        let create_resp = client
+            .post("/api/accounts")
+            .header("Authorization", format!("Bearer {token}"))
+            .body_json(&serde_json::json!({
+                "id": "", "name": "master", "provider": "GitHub", "api_base": "https://api.github.com",
+                "git_base": "https://github.com", "owner": "aon-co-jp", "token": "  ghp_pastedwithwhitespace\n"
+            }))
+            .send()
+            .await;
+        create_resp.assert_status_is_ok();
+        let created: serde_json::Value = create_resp.0.into_body().into_json().await.unwrap();
+        let id = created["id"].as_str().unwrap().to_string();
+
+        {
+            let store = state_for_inspection.store.lock().unwrap();
+            let acc = store.accounts.iter().find(|a| a.id == id).unwrap();
+            assert_eq!(acc.token, "ghp_pastedwithwhitespace", "token was not trimmed on create: {:?}", acc.token);
+        }
+
+        let update_resp = client
+            .put(format!("/api/accounts/{id}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .body_json(&serde_json::json!({"token": "\tghp_anothertoken  "}))
+            .send()
+            .await;
+        update_resp.assert_status_is_ok();
+
+        let store = state_for_inspection.store.lock().unwrap();
+        let acc = store.accounts.iter().find(|a| a.id == id).unwrap();
+        assert_eq!(acc.token, "ghp_anothertoken", "token was not trimmed on update: {:?}", acc.token);
     }
 
     /// 2026-07-29追記(ユーザー指示「レンタルサーバーやVPSやローカル

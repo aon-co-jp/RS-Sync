@@ -42,6 +42,68 @@ RS-Git/RPoem等と同じ方針: `poem`クレートを直接利用する単純な
   配下にマウントされても壊れないようにするため(open-gitea(現RS-Git)の`/rgit`デプロイ
   で絶対パスfetchが壊れた教訓を踏襲)。
 
+## HANDOFF追記(2026-08-12) トークン欄のtrim漏れによる401 Unauthorized実バグを発見・修正(コンテキストリミット接近のため一時停止、ビルド未完了の正直な開示あり)
+
+ユーザーが実際に本番相当の環境でクイック設定から同期ジョブを作成した
+ところ、`aon-co-jp -> OpenRuno`ジョブが`auth_error`ステータスで
+`repo discovery failed: GitHub list_repos failed: 401 Unauthorized`を
+報告。原因調査・修正を行った。
+
+1. **原因**: `static/index.html`のトークン入力欄(クイック設定フォーム・
+   通常のアカウント登録フォーム`#accForm`・個別アカウントのトークン
+   更新欄)がいずれも`.trim()`されずに`input.value`/`FormData`の値を
+   そのままAPIへ送っていた。GitHub PATをブラウザへコピペする際に
+   前後に紛れ込みやすい空白・改行がそのままGitHub APIへ送信されると、
+   GitHub側はこれを有効なトークン形式として認識できず**401
+   Unauthorized**で拒否する(スコープ不足による`403`とは異なり、
+   資格情報そのものが無効という扱いになる)——`maybe_auth_header`
+   (2026-07-29修正、空トークン時はAuthorizationヘッダー自体を送らない
+   ロジック)自体は正しく動作していたが、「空でないが実質無効な
+   トークン」というこのケースは想定していなかった。
+2. **修正**:
+   - クライアント側: `static/index.html`の4箇所(クイック設定の
+     マスター/コピー先トークン欄・`#accForm`の`token`フィールド・
+     個別アカウントのトークン更新`updateAccountToken`)全てに
+     `.trim()`を追加。
+   - **サーバー側でも防御的にtrim**(ユーザー指示「コピペ時に紛れ込む
+     前後の空白/改行を自動削除する機能を搭載して」への対応、単一の
+     UIパスだけでなくAndroid版アプリやAPI直接呼び出し等、他のクライアント
+     経由でも確実に効くようにするため): `src/main.rs`の`create_account`・
+     `update_account_token`の両ハンドラで`acc.token.trim().to_string()`/
+     `body.token.trim().to_string()`を適用。
+3. **回帰テスト追加**: `account_tokens_are_trimmed_of_surrounding_
+   whitespace_on_create_and_update`(新規)——前後に空白・改行・タブを
+   含むトークンを`POST /api/accounts`・`PUT /api/accounts/:id`双方へ
+   送り、サーバー内部のストア(`state.store`を直接検査)に保存される
+   トークンが実際にtrim済みであることを確認する。
+4. **正直な開示・未完了(コンテキストリミット接近のため中断)**:
+   `cargo test --bin rs-sync account_tokens_are_trimmed`をバックグラウンド
+   実行中に本セッションが終了時刻に達し、**ビルド完了・テスト結果の
+   確認ができていない**——コードレビュー上は既存の
+   `account_token_can_be_updated_without_recreating_the_account`等の
+   既存テストと同じパターンに従っており、コンパイルエラーになる要素は
+   見当たらないが、実際にgreenであることの確認は次回セッション最優先で
+   行うこと。ローカルの`RS_SYNC_REQUIRE_AUTH=false`検証時点
+   (修正前バージョン)ではクイック設定フォーム自体の表示・送信経路は
+   正常に動作していたことを確認済み(スクリーンショットで
+   マスター/コピー先URL・トークン・間隔選択の全フィールドの存在を
+   確認済み)。
+5. **ユーザーへの案内(このHANDOFF内に記録、次回参照用)**: GitHub
+   Classic PATのスコープ——マスター(読み取り)用は公開リポジトリのみ
+   なら無スコープ(空欄可)、非公開含むなら`repo`のみ。コピー先
+   (書き込み)用は`repo`(または公開限定なら`public_repo`)のみ。
+   「期間永久」は発行時のExpiration欄で「No expiration」を選択する。
+- 次にすべきこと: (1) `cargo build`/`cargo test --bin rs-sync`の完走
+  確認(最優先)、(2) 本番(`https://easy-web.tokyo/rs-sync/`)への
+  デプロイ(`git pull`→`cargo build --release`→
+  `systemctl restart rs-sync.service`、`static/index.html`はランタイム
+  配信のため再ビルド不要な可能性が高いが要確認)、(3) ユーザーが実際に
+  `aon-co-jp -> OpenRuno`ジョブを再実行し、401エラーが解消することの
+  実地確認(トークンが最初から空白付きで保存されている既存アカウントは、
+  今回の修正では過去データまで自動修正しないため、ユーザーに一度
+  トークンを再入力〈またはトークン更新欄から再送〉してもらう必要がある
+  可能性がある)。
+
 ## HANDOFF追記(2026-08-07続き4) Android実機で「本体をこの端末で実行」機能の起動確認完了、実バグ2件を発見・修正
 
 前回HANDOFF(続き3)の「次にすべきこと」を実施。`cargo ndk -t arm64-v8a
