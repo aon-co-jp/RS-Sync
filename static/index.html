@@ -357,7 +357,8 @@ const dict = {
    feUsernameLabel:"ユーザー名(SFTP/SMBのみ)", fePasswordLabel:"パスワード(SFTPは秘密鍵を使うなら空欄可、SMBは必須)",
    feKeyLabel:"秘密鍵ファイルのパス(SFTPのみ、このサーバー上のパス。パスワードより優先)",
    feShareLabel:"共有名(SMBのみ、例: usb1_1)",
-   folderJobsH:"フォルダ同期ジョブ", addFolderJob:"ジョブを追加"},
+   folderJobsH:"フォルダ同期ジョブ", addFolderJob:"ジョブを追加",
+   syncingNow:"同期中！", syncCompleteNow:"同期完了！", waitingNextSync:"次の同期待機中！", scheduleCanceled:"次の同期予約は解除！", syncFailedNow:"同期失敗！"},
  en: {title:"RS-Sync — Git Repository Sync Tool", intro:"One-way backup or two-way sync of repositories across GitHub / open-gitea / Gitea / Gitbucket.",
    loginH:"Login", loginNote:"For security reasons, only the registered admin email can log in.",
    loginEmailLabel:"Admin email address", sendCode:"Send code", loginCodeLabel:"Received code (6 digits)", login:"Log in",
@@ -402,7 +403,8 @@ const dict = {
    feUsernameLabel:"Username (SFTP/SMB only)", fePasswordLabel:"Password (SFTP: optional if using a private key; SMB: required)",
    feKeyLabel:"Private key file path (SFTP only, path on this server; takes priority over password)",
    feShareLabel:"Share name (SMB only, e.g. usb1_1)",
-   folderJobsH:"Folder sync jobs", addFolderJob:"Add job"}
+   folderJobsH:"Folder sync jobs", addFolderJob:"Add job",
+   syncingNow:"Syncing!", syncCompleteNow:"Sync complete!", waitingNextSync:"Waiting for next sync!", scheduleCanceled:"Next sync schedule canceled!", syncFailedNow:"Sync failed!"}
 };
 let lang = "ja";
 function applyI18n(){
@@ -559,7 +561,7 @@ async function renderJobs(accs){
   document.getElementById("jobs").innerHTML = jobs.length ? (`<table><tr><th>Name</th><th>${dict[lang].source}</th><th>${dict[lang].dest}</th><th>Dir</th><th>Status</th><th></th></tr>` +
     jobs.map(j=>{
       const conflictBadges = (j.conflicted_repos||[]).map(r=>`<span class="pill conflict">${r} <a href="#" onclick="resolveConflict('${j.id}','${r}');return false;">[${dict[lang].resolve}]</a></span>`).join(" ");
-      const statusPill = j.last_run_status ? `<span class="pill ${j.last_run_status==='ok'?'ok':'err'}">${j.last_run_status}</span>` : "-";
+      const statusPill = syncStatusPill(j);
       const lastLog = lastLogFor(j.id);
       const errorLine = (j.last_run_status && j.last_run_status !== "ok" && lastLog)
         ? `<div class="hint" style="color:#ff9a9a">${escapeHtml(lastLog.message)}</div>` : "";
@@ -568,6 +570,39 @@ async function renderJobs(accs){
       return `<tr><td>${j.name}${sameAccountWarning}</td><td>${accName(j.source_account_id)}</td><td>${accName(j.dest_account_id)}</td><td>${j.direction}</td><td>${statusPill} ${conflictBadges}${errorLine}</td>
       <td><button onclick="runJob('${j.id}')">${dict[lang].run}</button><button onclick="delJob('${j.id}')">${dict[lang].del}</button></td></tr>`;
     }).join("") + "</table>") : "<p>-</p>";
+}
+
+// 実行中/完了直後の一時的な状態表示(ユーザー指示: 「同期中！」
+// 「同期完了！」「次の同期待機中！」を日英で出す)。サーバー側の
+// last_run_status(ok/error/auth_error)はジョブ完了後にしか変わらない
+// ため、クリックした瞬間の「今まさに動いている」感はUI側でしか表現
+// できない——syncingJobs(実行中)・justSyncedJobs(完了直後、数秒だけ
+// 表示)をクライアント側のSetで管理する。
+const syncingJobs = new Set();
+const justSyncedJobs = new Set();
+function hasSchedule(j){
+  const s = j.schedule;
+  return !!(s && (s.every_hours || s.realtime_poll_minutes || (s.days_of_week && s.days_of_week.length)));
+}
+function syncStatusPill(j){
+  if (syncingJobs.has(j.id)) {
+    return `<span class="pill" style="background:#3a6ea5">${dict[lang].syncingNow}</span>`;
+  }
+  if (justSyncedJobs.has(j.id)) {
+    return j.last_run_status === "ok"
+      ? `<span class="pill ok">${dict[lang].syncCompleteNow}</span>`
+      : `<span class="pill err">${dict[lang].syncFailedNow}</span>`;
+  }
+  const base = j.last_run_status ? `<span class="pill ${j.last_run_status==='ok'?'ok':'err'}">${j.last_run_status}</span>` : "-";
+  let extra = "";
+  if (j.last_run_status === "ok") {
+    extra = hasSchedule(j)
+      ? ` <span class="pill" style="background:#555">${dict[lang].waitingNextSync}</span>`
+      : ` <span class="pill" style="background:#8a5a2a">${dict[lang].scheduleCanceled}</span>`;
+  } else if (j.last_run_status) {
+    extra = ` <span class="pill err">${dict[lang].syncFailedNow}</span>`;
+  }
+  return base + extra;
 }
 
 function escapeHtml(s){
@@ -619,7 +654,7 @@ async function renderFolderJobs(eps){
   const lastLogFor = jobId => logs.find(l => l.job_id === jobId);
   document.getElementById("folder-jobs").innerHTML = jobs.length ? (`<table><tr><th>Name</th><th>${dict[lang].source}</th><th>${dict[lang].dest}</th><th>Status</th><th></th></tr>` +
     jobs.map(j=>{
-      const statusPill = j.last_run_status ? `<span class="pill ${j.last_run_status==='ok'?'ok':'err'}">${j.last_run_status}</span>` : "-";
+      const statusPill = syncStatusPill(j);
       const lastLog = lastLogFor(j.id);
       const errorLine = (j.last_run_status && j.last_run_status !== "ok" && lastLog)
         ? `<div class="hint" style="color:#ff9a9a">${escapeHtml(lastLog.message)}</div>` : "";
@@ -630,7 +665,17 @@ async function renderFolderJobs(eps){
 
 async function delFolderEndpoint(id){ await api("api/folder-endpoints/"+id, {method:"DELETE"}); renderAll(); }
 async function delFolderJob(id){ await api("api/folder-jobs/"+id, {method:"DELETE"}); renderAll(); }
-async function runFolderJob(id){ await api("api/folder-jobs/"+id+"/run", {method:"POST"}); renderAll(); }
+async function runFolderJob(id){
+  syncingJobs.add(id); justSyncedJobs.delete(id); renderAll();
+  try {
+    await api("api/folder-jobs/"+id+"/run", {method:"POST"});
+  } finally {
+    syncingJobs.delete(id);
+    justSyncedJobs.add(id);
+    renderAll();
+    setTimeout(()=>{ justSyncedJobs.delete(id); renderAll(); }, 4000);
+  }
+}
 
 async function renderAll(){
   renderSchedulerHealth();
@@ -646,10 +691,24 @@ async function renderAll(){
 
 // 30秒ごとに稼働状況を自動更新(ログイン状態に関わらず)。
 setInterval(renderSchedulerHealth, 30000);
+// スケジューラによる自動実行(ユーザーのクリックを介さない)でも
+// 「次の同期待機中！」等の表示が古いままにならないよう、ログイン中は
+// ジョブ一覧も定期更新する。
+setInterval(()=>{ if (sessionToken() || authNotRequired) renderAll(); }, 30000);
 
 async function delAcc(id){ await api("api/accounts/"+id, {method:"DELETE"}); renderAll(); }
 async function delJob(id){ await api("api/jobs/"+id, {method:"DELETE"}); renderAll(); }
-async function runJob(id){ const r = await api("api/jobs/"+id+"/run", {method:"POST"}); renderAll(); }
+async function runJob(id){
+  syncingJobs.add(id); justSyncedJobs.delete(id); renderAll();
+  try {
+    await api("api/jobs/"+id+"/run", {method:"POST"});
+  } finally {
+    syncingJobs.delete(id);
+    justSyncedJobs.add(id);
+    renderAll();
+    setTimeout(()=>{ justSyncedJobs.delete(id); renderAll(); }, 4000);
+  }
+}
 async function resolveConflict(id, repo){ await api(`api/jobs/${id}/resolve/${encodeURIComponent(repo)}`, {method:"POST"}); renderAll(); }
 
 document.getElementById("accForm").onsubmit = async (e)=>{
