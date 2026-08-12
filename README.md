@@ -48,6 +48,35 @@ over HTTP(S), so any provider that speaks git smart-HTTP will work for the
 actual sync even where the REST adapter above is unverified; only repo
 discovery/creation depends on the adapter.
 
+## Recent updates (2026-08-12)
+
+- **Scheduler/manual-run race fixed**: a per-job lock (`AppState.running_jobs`)
+  now prevents the scheduler's tick and a manual "sync now" click from
+  racing on the same job's git cache directory (was causing real
+  `cannot copy '...hooks/pre-applypatch.sample': File exists` failures in
+  production for a large repo set).
+- **Interval display + inline editing + auto-widen**: each job now shows its
+  current check interval, can have it changed without recreating the job
+  (`PUT /api/jobs/:id`, `PUT /api/folder-jobs/:id`), and the server
+  automatically raises the interval (never lowers it) if a run's actual
+  duration exceeds the configured interval — tiers
+  `[1,3,5,15,30,60,120,240,360,720,1440]` minutes, target ≥1.5× the measured
+  duration. The originally-specified interval is kept separately
+  (`initial_realtime_poll_minutes`) so it never gets silently overwritten by
+  the auto-widen logic.
+- **Quick-setup form no longer duplicates accounts/jobs on resubmit**: it now
+  reuses an existing account by owner (skipping the token update if the
+  field is left blank) and updates an existing job's schedule instead of
+  creating a duplicate — and pre-fills from existing accounts on load, with
+  token fields showing a masked "already set" placeholder rather than ever
+  re-displaying the real token.
+- **Live status/date UI**: per-job "syncing / complete / failed / waiting for
+  next run / schedule canceled" pills (JA+EN), a live clock, a
+  per-job "next sync estimate" column, and timezone/country labels on all
+  timestamps (defaults to the viewer's own local time; Japan shows "日本時刻",
+  others show an English + local-language country name, Iran shown as
+  "Iran (Persia)").
+
 ## Recent updates (2026-08-07)
 
 - **VPS/phone duplicate-run avoidance (failover)**: set
@@ -168,6 +197,28 @@ Gitbucket)間でリポジトリを同期・バックアップするWebアプリ�
 いるGitea/GitBucket/open-gitea(あるいはセルフホスト版GitLab/Bitbucket)
 も、そのURLをAPI base/git baseに指定するだけで既存のプロバイダとして
 そのまま登録できる。
+
+### 最近の更新(2026-08-12)
+
+- **スケジューラtickと手動実行の競合を修正**: ジョブID単位の排他ロック
+  (`AppState.running_jobs`)を追加し、両者が同じgitキャッシュ
+  ディレクトリへ同時に書き込んで失敗する実障害(本番で実際に発生)を解消。
+- **間隔の表示・その場での変更・データ量に応じた自動延長**: 各ジョブに
+  現在のチェック間隔を表示し、削除して作り直さず変更できる
+  (`PUT /api/jobs/:id`・`PUT /api/folder-jobs/:id`)。実行時間が設定間隔を
+  超えたらサーバー側で自動的に間隔を引き上げる(縮めることはしない、
+  段階`[1,3,5,15,30,60,120,240,360,720,1440]`分、目安は実測の1.5倍以上)。
+  最初に指定した間隔は`initial_realtime_poll_minutes`として別途保持し、
+  自動延長で上書きされない。
+- **クイック設定フォームの再送信で重複作成しないよう修正**: owner一致の
+  既存アカウントを再利用(トークン欄が空欄なら変更しない)、既存ジョブは
+  スケジュールのみ更新。フォームは既存アカウントから自動入力され、
+  トークン欄は実トークンを再表示せず「設定済み」の伏字プレースホルダの
+  み表示。
+- **状態表示・日時UIの強化**: 同期中/完了/失敗/次回待機中/予約解除の
+  ステータス表示(日英)、現在時刻のライブ表示、次回同期予定列、
+  タイムゾーン・国名ラベル(閲覧者の現地時刻がデフォルト、日本なら
+  「日本時刻」、他国は英語+現地語の国名、イランのみ"Iran (Persia)")。
 
 ### 最近の更新(2026-08-07)
 
