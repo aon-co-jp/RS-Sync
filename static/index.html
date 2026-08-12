@@ -77,6 +77,7 @@ a{color:#5fb3ff}
 <button id="langBtn">EN</button>
 <h1 data-i18n="title">RS-Sync — Gitリポジトリ同期ツール</h1>
 <p data-i18n="intro">GitHub / open-gitea / Gitea / Gitbucket 間でリポジトリを一方向バックアップ同期・双方向同期します。</p>
+<p id="current-time" class="hint"></p>
 <p class="demo-notice">
   ここは管理者向け本番環境です。試しに触ってみたい方はデモ環境をどうぞ:
   <a href="/rs-sync/demo">https://easy-web.tokyo/rs-sync/demo</a><br>
@@ -128,7 +129,8 @@ a{color:#5fb3ff}
 
   <label for="quick-schedule" data-i18n="quickScheduleLabel">マスターの変化をチェックする間隔</label>
   <select id="quick-schedule">
-    <option value="1" data-i18n="presetRealtime">リアルタイム(1分ごとにチェック)</option>
+    <option value="3" data-i18n="preset3">3分ごと</option>
+    <option value="5" data-i18n="preset5">5分ごと</option>
     <option value="15" data-i18n="preset15">15分ごと</option>
     <option value="30" selected data-i18n="preset30">30分ごと</option>
     <option value="60" data-i18n="preset60">1時間ごと</option>
@@ -213,9 +215,10 @@ a{color:#5fb3ff}
 <label for="job-repos" data-i18n="reposLabel">対象リポジトリ名(カンマ区切り、空欄で全リポジトリ)</label>
 <input id="job-repos" name="repos" placeholder="repo1,repo2">
 
-<label for="job-realtime" data-i18n="realtime">何分ごとに自動実行するか(リアルタイム・15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)</label>
+<label for="job-realtime" data-i18n="realtime">何分ごとに自動実行するか(3分・5分・15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)</label>
 <div class="buttons">
-  <button type="button" data-i18n="presetRealtime" onclick="document.getElementById('job-realtime').value=1">リアルタイム(1分ごと)</button>
+  <button type="button" data-i18n="preset3" onclick="document.getElementById('job-realtime').value=3">3分ごと</button>
+  <button type="button" data-i18n="preset5" onclick="document.getElementById('job-realtime').value=5">5分ごと</button>
   <button type="button" data-i18n="preset15" onclick="document.getElementById('job-realtime').value=15">15分ごと</button>
   <button type="button" data-i18n="preset30" onclick="document.getElementById('job-realtime').value=30">30分ごと</button>
   <button type="button" data-i18n="preset60" onclick="document.getElementById('job-realtime').value=60">1時間ごと</button>
@@ -289,9 +292,10 @@ a{color:#5fb3ff}
 <label for="fj-dest" data-i18n="dest">宛先(コピー先)</label>
 <select name="dest_endpoint_id" id="feDstSel"></select>
 
-<label for="fj-realtime" data-i18n="realtime">何分ごとに自動実行するか(リアルタイム・15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)</label>
+<label for="fj-realtime" data-i18n="realtime">何分ごとに自動実行するか(3分・5分・15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)</label>
 <div class="buttons">
-  <button type="button" data-i18n="presetRealtime" onclick="document.getElementById('fj-realtime').value=1">リアルタイム(1分ごと)</button>
+  <button type="button" data-i18n="preset3" onclick="document.getElementById('fj-realtime').value=3">3分ごと</button>
+  <button type="button" data-i18n="preset5" onclick="document.getElementById('fj-realtime').value=5">5分ごと</button>
   <button type="button" data-i18n="preset15" onclick="document.getElementById('fj-realtime').value=15">15分ごと</button>
   <button type="button" data-i18n="preset30" onclick="document.getElementById('fj-realtime').value=30">30分ごと</button>
   <button type="button" data-i18n="preset60" onclick="document.getElementById('fj-realtime').value=60">1時間ごと</button>
@@ -334,8 +338,10 @@ const dict = {
    oneway:"一方向(ソース→宛先のみ)", twoway:"双方向(両方の変更を反映)",
    reposLabel:"対象リポジトリ名(カンマ区切り、空欄で全リポジトリ)",
    realtime:"何分ごとに自動実行するか(15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)",
-   presetRealtime:"リアルタイム(1分ごと)", preset15:"15分ごと", preset30:"30分ごと", preset60:"1時間ごと", presetClear:"クリア",
-   realtimeHint:"「リアルタイム」はWebhookではなく1分間隔のポーリングです(サーバーへの負荷とAPIレート制限にご注意ください)。",
+   preset3:"3分ごと", preset5:"5分ごと", preset15:"15分ごと", preset30:"30分ごと", preset60:"1時間ごと", presetClear:"クリア",
+   realtimeHint:"自動実行はWebhookではなくポーリングです(短い間隔ほどサーバーへの負荷とAPIレート制限にご注意ください)。",
+   editSchedule:"間隔を変更", saveSchedule:"保存", currentInterval:"現在の間隔",
+   lastDurationHint:"前回の同期にかかった時間", tooShortIntervalWarning:"⚠ このデータ量だと同期に約{min}分かかっています。間隔を{min}分以上にすることをおすすめします(短すぎると次の実行と重なる可能性があります)。",
    quickH:"クイック設定: マスター→コピー先(複数可)",
    quickHint:"「このGitHub組織/アカウントをマスターとして、変化があれば以下の組織/アカウントへ全リポジトリをコピー同期する」という設定を、アカウント登録・ジョブ作成を個別に行わずまとめて作成します(コピー先は複数指定可)。一方向(マスター→コピー先のみ)・全リポジトリ・下で選んだ間隔での自動実行として作成されます。",
    quickMasterLabel:"マスター(コピー元)のGitHub URLまたは組織/ユーザー名", quickMasterTokenLabel:"マスターの読み取り用トークン(公開リポジトリのみなら空欄可)",
@@ -358,7 +364,9 @@ const dict = {
    feKeyLabel:"秘密鍵ファイルのパス(SFTPのみ、このサーバー上のパス。パスワードより優先)",
    feShareLabel:"共有名(SMBのみ、例: usb1_1)",
    folderJobsH:"フォルダ同期ジョブ", addFolderJob:"ジョブを追加",
-   syncingNow:"同期中！", syncCompleteNow:"同期完了！", waitingNextSync:"次の同期待機中！", scheduleCanceled:"次の同期予約は解除！", syncFailedNow:"同期失敗！"},
+   syncingNow:"同期中！", syncCompleteNow:"同期完了！", waitingNextSync:"次の同期待機中！", scheduleCanceled:"次の同期予約は解除！", syncFailedNow:"同期失敗！",
+   statusOk:"正常", statusError:"エラー", statusAuthError:"認証エラー",
+   currentTimeLabel:"現在の日時", nextSyncLabel:"次回の同期予定"},
  en: {title:"RS-Sync — Git Repository Sync Tool", intro:"One-way backup or two-way sync of repositories across GitHub / open-gitea / Gitea / Gitbucket.",
    loginH:"Login", loginNote:"For security reasons, only the registered admin email can log in.",
    loginEmailLabel:"Admin email address", sendCode:"Send code", loginCodeLabel:"Received code (6 digits)", login:"Log in",
@@ -380,8 +388,10 @@ const dict = {
    oneway:"One-way (source to destination only)", twoway:"Two-way (changes on both sides are applied)",
    reposLabel:"Target repo names (comma-separated, empty = all repos)",
    realtime:"Run automatically every N minutes (15/30/60-minute presets, or type any custom number. Empty = no automatic runs)",
-   presetRealtime:"Realtime (every 1 min)", preset15:"Every 15 min", preset30:"Every 30 min", preset60:"Every hour", presetClear:"Clear",
-   realtimeHint:"\"Realtime\" is 1-minute polling, not a webhook (be mindful of server load and API rate limits).",
+   preset3:"Every 3 min", preset5:"Every 5 min", preset15:"Every 15 min", preset30:"Every 30 min", preset60:"Every hour", presetClear:"Clear",
+   realtimeHint:"Automatic runs use polling, not a webhook (shorter intervals mean more server load and API rate-limit risk).",
+   editSchedule:"Change interval", saveSchedule:"Save", currentInterval:"Current interval",
+   lastDurationHint:"Time the last sync took", tooShortIntervalWarning:"⚠ Given this data size, the sync took about {min} min last time. We recommend setting the interval to at least {min} min (too short risks overlapping with the next run).",
    quickH:"Quick setup: master → copy-to (multiple allowed)",
    quickHint:"Create the accounts and sync job(s) for \"treat this GitHub org/account as the master, and copy all repos to these org(s)/account(s) whenever it changes\" in one step (multiple copy-to destinations allowed). Created as one-way (master to copy-to only), all repos, auto-run at the interval selected below.",
    quickMasterLabel:"Master (source) GitHub URL or org/user name", quickMasterTokenLabel:"Master read token (leave empty for public repos only)",
@@ -404,7 +414,9 @@ const dict = {
    feKeyLabel:"Private key file path (SFTP only, path on this server; takes priority over password)",
    feShareLabel:"Share name (SMB only, e.g. usb1_1)",
    folderJobsH:"Folder sync jobs", addFolderJob:"Add job",
-   syncingNow:"Syncing!", syncCompleteNow:"Sync complete!", waitingNextSync:"Waiting for next sync!", scheduleCanceled:"Next sync schedule canceled!", syncFailedNow:"Sync failed!"}
+   syncingNow:"Syncing!", syncCompleteNow:"Sync complete!", waitingNextSync:"Waiting for next sync!", scheduleCanceled:"Next sync schedule canceled!", syncFailedNow:"Sync failed!",
+   statusOk:"OK", statusError:"Error", statusAuthError:"Auth error",
+   currentTimeLabel:"Current date/time", nextSyncLabel:"Next sync scheduled for"}
 };
 let lang = "ja";
 function applyI18n(){
@@ -550,6 +562,65 @@ async function updateAccountToken(id){
   }
 }
 
+// ユーザー指示(2026-08-12「間隔を何分に設定したかも表示する機能と
+// 変更可能な機能」+「これだけのDATA量だと何分は掛かります、のような
+// オススメ機能」)への対応。
+function scheduleSummaryText(s){
+  if (!s) return dict[lang].quickManualOnly;
+  if (s.realtime_poll_minutes) return lang === "ja" ? `${s.realtime_poll_minutes}分ごと` : `Every ${s.realtime_poll_minutes} min`;
+  if (s.every_hours) return lang === "ja" ? `${s.every_hours}時間ごと` : `Every ${s.every_hours} h`;
+  if (s.days_of_week && s.days_of_week.length && s.hour != null && s.minute != null) {
+    const hh = String(s.hour).padStart(2, "0"), mm = String(s.minute).padStart(2, "0");
+    return lang === "ja" ? `曜日指定 ${hh}:${mm}` : `Weekly at ${hh}:${mm}`;
+  }
+  return dict[lang].quickManualOnly;
+}
+function lastRunDurationMinutes(jobId, logs){
+  const l = logs.find(x => x.job_id === jobId && x.finished_at);
+  if (!l) return null;
+  const ms = new Date(l.finished_at) - new Date(l.started_at);
+  return Math.max(0, Math.round(ms / 60000));
+}
+function scheduleCell(job, logs, kind){
+  const summary = scheduleSummaryText(job.schedule);
+  const dur = lastRunDurationMinutes(job.id, logs);
+  const durHint = dur != null
+    ? `<div class="hint">${dict[lang].lastDurationHint}: ${dur < 1 ? "<1" : dur}${lang === "ja" ? "分" : " min"}</div>` : "";
+  const configuredMinutes = job.schedule && (job.schedule.realtime_poll_minutes || (job.schedule.every_hours ? job.schedule.every_hours * 60 : null));
+  const warn = (dur != null && dur > 0 && configuredMinutes != null && configuredMinutes < dur)
+    ? `<div class="hint" style="color:#ffcf6b">${dict[lang].tooShortIntervalWarning.replace(/\{min\}/g, dur)}</div>` : "";
+  const editId = `sched-edit-${kind}-${job.id}`;
+  const inputId = `sched-minutes-${kind}-${job.id}`;
+  const currentMinutes = (job.schedule && job.schedule.realtime_poll_minutes) || "";
+  return `<div>${dict[lang].currentInterval}: ${summary}${durHint}${warn}
+    <div class="buttons">
+      <button type="button" onclick="toggleScheduleEdit('${kind}','${job.id}')">${dict[lang].editSchedule}</button>
+    </div>
+    <div id="${editId}" class="hidden">
+      <input type="number" min="1" id="${inputId}" placeholder="${lang === "ja" ? "分" : "minutes"}" value="${currentMinutes}" style="width:5em">
+      <div class="buttons">
+        <button type="button" onclick="document.getElementById('${inputId}').value=3">3</button>
+        <button type="button" onclick="document.getElementById('${inputId}').value=5">5</button>
+        <button type="button" onclick="document.getElementById('${inputId}').value=15">15</button>
+        <button type="button" onclick="document.getElementById('${inputId}').value=30">30</button>
+        <button type="button" onclick="document.getElementById('${inputId}').value=60">60</button>
+        <button type="button" onclick="saveSchedule('${kind}','${job.id}')">${dict[lang].saveSchedule}</button>
+      </div>
+    </div>
+  </div>`;
+}
+function toggleScheduleEdit(kind, id){
+  document.getElementById(`sched-edit-${kind}-${id}`).classList.toggle("hidden");
+}
+async function saveSchedule(kind, id){
+  const input = document.getElementById(`sched-minutes-${kind}-${id}`);
+  const minutes = input.value ? parseInt(input.value) : null;
+  const schedule = { every_hours: null, days_of_week: [], hour: null, minute: null, realtime_poll_minutes: minutes };
+  const path = kind === "job" ? `api/jobs/${id}` : `api/folder-jobs/${id}`;
+  await api(path, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ schedule }) });
+  renderAll();
+}
+
 async function renderJobs(accs){
   const jobs = await api("api/jobs");
   const logs = await api("api/logs");
@@ -558,7 +629,7 @@ async function renderJobs(accs){
   // (`logs`はAPI仕様上すでに新しい順)。ステータスの丸印だけでは
   // 何が起きたか分からない、というユーザー指摘への対応。
   const lastLogFor = jobId => logs.find(l => l.job_id === jobId);
-  document.getElementById("jobs").innerHTML = jobs.length ? (`<table><tr><th>Name</th><th>${dict[lang].source}</th><th>${dict[lang].dest}</th><th>Dir</th><th>Status</th><th></th></tr>` +
+  document.getElementById("jobs").innerHTML = jobs.length ? (`<table><tr><th>Name</th><th>${dict[lang].source}</th><th>${dict[lang].dest}</th><th>Dir</th><th>Status</th><th>${dict[lang].currentInterval}</th><th></th></tr>` +
     jobs.map(j=>{
       const conflictBadges = (j.conflicted_repos||[]).map(r=>`<span class="pill conflict">${r} <a href="#" onclick="resolveConflict('${j.id}','${r}');return false;">[${dict[lang].resolve}]</a></span>`).join(" ");
       const statusPill = syncStatusPill(j);
@@ -567,7 +638,7 @@ async function renderJobs(accs){
         ? `<div class="hint" style="color:#ff9a9a">${escapeHtml(lastLog.message)}</div>` : "";
       const sameAccountWarning = (j.source_account_id === j.dest_account_id)
         ? `<div class="hint" style="color:#ffcf6b">${dict[lang].sameAccountWarning}</div>` : "";
-      return `<tr><td>${j.name}${sameAccountWarning}</td><td>${accName(j.source_account_id)}</td><td>${accName(j.dest_account_id)}</td><td>${j.direction}</td><td>${statusPill} ${conflictBadges}${errorLine}</td>
+      return `<tr><td>${j.name}${sameAccountWarning}</td><td>${accName(j.source_account_id)}</td><td>${accName(j.dest_account_id)}</td><td>${j.direction}</td><td>${statusPill} ${conflictBadges}${errorLine}</td><td>${scheduleCell(j, logs, "job")}</td>
       <td><button onclick="runJob('${j.id}')">${dict[lang].run}</button><button onclick="delJob('${j.id}')">${dict[lang].del}</button></td></tr>`;
     }).join("") + "</table>") : "<p>-</p>";
 }
@@ -584,6 +655,49 @@ function hasSchedule(j){
   const s = j.schedule;
   return !!(s && (s.every_hours || s.realtime_poll_minutes || (s.days_of_week && s.days_of_week.length)));
 }
+function formatDateTime(d){
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+function updateCurrentTime(){
+  const el = document.getElementById("current-time");
+  if (el) el.textContent = `${dict[lang].currentTimeLabel}: ${formatDateTime(new Date())}`;
+}
+updateCurrentTime();
+setInterval(updateCurrentTime, 1000);
+
+// ユーザー指示(2026-08-12): 次の同期待機中のジョブについて、
+// 「次回はいつ動くか」を推測して表示する。サーバー側
+// (scheduler::is_due_schedule)と同じロジックをクライアント側でも
+// 再現した近似計算——サーバーは実際には毎分tickでこの条件を再評価
+// するだけで「次回時刻」を保持していないため、正確な予約時刻という
+// より「このスケジュール設定ならおおよそこの頃」という目安表示。
+function estimateNextSync(j){
+  if (!j.last_run_at || !hasSchedule(j)) return null;
+  const last = new Date(j.last_run_at);
+  const candidates = [];
+  const s = j.schedule;
+  if (s.every_hours) candidates.push(new Date(last.getTime() + s.every_hours * 3600000));
+  if (s.realtime_poll_minutes) candidates.push(new Date(last.getTime() + s.realtime_poll_minutes * 60000));
+  if (s.days_of_week && s.days_of_week.length && s.hour != null && s.minute != null) {
+    const now = new Date();
+    for (let dayOffset = 0; dayOffset < 8; dayOffset++) {
+      const cand = new Date(now);
+      cand.setDate(now.getDate() + dayOffset);
+      cand.setHours(s.hour, s.minute, 0, 0);
+      if (cand <= now) continue;
+      if (s.days_of_week.includes(cand.getDay())) { candidates.push(cand); break; }
+    }
+  }
+  if (!candidates.length) return null;
+  return new Date(Math.min(...candidates.map(d => d.getTime())));
+}
+function statusLabel(status){
+  if (status === "ok") return dict[lang].statusOk;
+  if (status === "auth_error") return dict[lang].statusAuthError;
+  if (status === "error") return dict[lang].statusError;
+  return status;
+}
 function syncStatusPill(j){
   if (syncingJobs.has(j.id)) {
     return `<span class="pill" style="background:#3a6ea5">${dict[lang].syncingNow}</span>`;
@@ -593,12 +707,16 @@ function syncStatusPill(j){
       ? `<span class="pill ok">${dict[lang].syncCompleteNow}</span>`
       : `<span class="pill err">${dict[lang].syncFailedNow}</span>`;
   }
-  const base = j.last_run_status ? `<span class="pill ${j.last_run_status==='ok'?'ok':'err'}">${j.last_run_status}</span>` : "-";
+  const base = j.last_run_status ? `<span class="pill ${j.last_run_status==='ok'?'ok':'err'}">${statusLabel(j.last_run_status)}</span>` : "-";
   let extra = "";
   if (j.last_run_status === "ok") {
-    extra = hasSchedule(j)
-      ? ` <span class="pill" style="background:#555">${dict[lang].waitingNextSync}</span>`
-      : ` <span class="pill" style="background:#8a5a2a">${dict[lang].scheduleCanceled}</span>`;
+    if (hasSchedule(j)) {
+      const next = estimateNextSync(j);
+      const nextHint = next ? ` <span class="hint">(${dict[lang].nextSyncLabel}: ${formatDateTime(next)})</span>` : "";
+      extra = ` <span class="pill" style="background:#555">${dict[lang].waitingNextSync}</span>${nextHint}`;
+    } else {
+      extra = ` <span class="pill" style="background:#8a5a2a">${dict[lang].scheduleCanceled}</span>`;
+    }
   } else if (j.last_run_status) {
     extra = ` <span class="pill err">${dict[lang].syncFailedNow}</span>`;
   }
@@ -652,13 +770,13 @@ async function renderFolderJobs(eps){
   const logs = await api("api/logs");
   const epName = id => (eps.find(e=>e.id===id)||{}).name || id;
   const lastLogFor = jobId => logs.find(l => l.job_id === jobId);
-  document.getElementById("folder-jobs").innerHTML = jobs.length ? (`<table><tr><th>Name</th><th>${dict[lang].source}</th><th>${dict[lang].dest}</th><th>Status</th><th></th></tr>` +
+  document.getElementById("folder-jobs").innerHTML = jobs.length ? (`<table><tr><th>Name</th><th>${dict[lang].source}</th><th>${dict[lang].dest}</th><th>Status</th><th>${dict[lang].currentInterval}</th><th></th></tr>` +
     jobs.map(j=>{
       const statusPill = syncStatusPill(j);
       const lastLog = lastLogFor(j.id);
       const errorLine = (j.last_run_status && j.last_run_status !== "ok" && lastLog)
         ? `<div class="hint" style="color:#ff9a9a">${escapeHtml(lastLog.message)}</div>` : "";
-      return `<tr><td>${j.name}</td><td>${epName(j.source_endpoint_id)}</td><td>${epName(j.dest_endpoint_id)}</td><td>${statusPill}${errorLine}</td>
+      return `<tr><td>${j.name}</td><td>${epName(j.source_endpoint_id)}</td><td>${epName(j.dest_endpoint_id)}</td><td>${statusPill}${errorLine}</td><td>${scheduleCell(j, logs, "folder")}</td>
       <td><button onclick="runFolderJob('${j.id}')">${dict[lang].run}</button><button onclick="delFolderJob('${j.id}')">${dict[lang].del}</button></td></tr>`;
     }).join("") + "</table>") : "<p>-</p>";
 }

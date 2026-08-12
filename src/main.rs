@@ -211,6 +211,34 @@ fn create_job(state: Data<&Arc<AppState>>, Json(req): Json<NewJobReq>) -> Json<S
     Json(job)
 }
 
+/// ユーザー指示(2026-08-12「チェックする間隔を何分に設定したかも
+/// 表示する機能と変更可能な機能」)への対応: これまでジョブ作成後は
+/// スケジュールを変更する手段が無く、間隔を変えたい場合は削除して
+/// 作り直すしかなかった。スケジュールのみを差し替えるエンドポイントを
+/// 新設(名前・アカウント・方向・対象リポジトリは変更不可のまま——
+/// それらの変更は既存の「削除して作り直す」運用を維持し、今回は
+/// スケジュールに限定してスコープを絞った)。
+#[derive(serde::Deserialize)]
+struct UpdateScheduleReq {
+    schedule: Schedule,
+}
+
+#[handler]
+fn update_job_schedule(
+    state: Data<&Arc<AppState>>,
+    PPath(id): PPath<String>,
+    Json(req): Json<UpdateScheduleReq>,
+) -> Json<serde_json::Value> {
+    let mut store = state.store.lock().unwrap();
+    if let Some(job) = store.jobs.iter_mut().find(|j| j.id == id) {
+        job.schedule = req.schedule;
+        drop(store);
+        state.save();
+        return Json(serde_json::json!({"ok": true}));
+    }
+    Json(serde_json::json!({"ok": false}))
+}
+
 #[handler]
 fn delete_job(state: Data<&Arc<AppState>>, PPath(id): PPath<String>) -> Json<serde_json::Value> {
     {
@@ -360,6 +388,22 @@ fn create_folder_job(state: Data<&Arc<AppState>>, Json(req): Json<NewFolderJobRe
     }
     state.save();
     Json(job)
+}
+
+#[handler]
+fn update_folder_job_schedule(
+    state: Data<&Arc<AppState>>,
+    PPath(id): PPath<String>,
+    Json(req): Json<UpdateScheduleReq>,
+) -> Json<serde_json::Value> {
+    let mut store = state.store.lock().unwrap();
+    if let Some(job) = store.folder_jobs.iter_mut().find(|j| j.id == id) {
+        job.schedule = req.schedule;
+        drop(store);
+        state.save();
+        return Json(serde_json::json!({"ok": true}));
+    }
+    Json(serde_json::json!({"ok": false}))
 }
 
 #[handler]
@@ -535,14 +579,14 @@ fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::End
         .at("/accounts", get(list_accounts).post(create_account))
         .at("/accounts/:id", poem::delete(delete_account).put(update_account_token))
         .at("/jobs", get(list_jobs).post(create_job))
-        .at("/jobs/:id", poem::delete(delete_job))
+        .at("/jobs/:id", poem::delete(delete_job).put(update_job_schedule))
         .at("/jobs/:id/run", post(run_job_now))
         .at("/jobs/:id/resolve/:repo", post(resolve_conflict))
         .at("/logs", get(list_logs))
         .at("/folder-endpoints", get(list_folder_endpoints).post(create_folder_endpoint))
         .at("/folder-endpoints/:id", poem::delete(delete_folder_endpoint).put(update_folder_endpoint_credentials))
         .at("/folder-jobs", get(list_folder_jobs).post(create_folder_job))
-        .at("/folder-jobs/:id", poem::delete(delete_folder_job))
+        .at("/folder-jobs/:id", poem::delete(delete_folder_job).put(update_folder_job_schedule))
         .at("/folder-jobs/:id/run", post(run_folder_job_now))
         .with(RequireAuth { auth_state: auth_state.clone() });
 
@@ -851,5 +895,78 @@ mod tests {
             .send()
             .await;
         resp.assert_status(StatusCode::UNAUTHORIZED);
+    }
+
+    /// 2026-08-12追記(ユーザー指示「チェックする間隔を何分に設定したかも
+    /// 表示する機能と変更可能な機能」)への対応: `PUT /api/folder-jobs/:id`で
+    /// ジョブを削除・再作成せずスケジュールだけを更新できることの回帰確認。
+    #[tokio::test]
+    async fn folder_job_schedule_can_be_updated_without_recreating_the_job() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, auth_state) = make_state(&tmp, true);
+        let token = auth_state.auth.create_session("admin@example.com");
+        let app = build_app(state, auth_state);
+        let client = TestClient::new(app);
+        let auth = format!("Bearer {token}");
+
+        let src_resp = client
+            .post("/api/folder-endpoints")
+            .header("Authorization", &auth)
+            .body_json(&serde_json::json!({
+                "id": "", "name": "src", "kind": "Local", "path": "/tmp/a",
+                "host": "", "port": 22, "username": "", "password": "", "private_key_path": "", "share": ""
+            }))
+            .send()
+            .await;
+        let src: serde_json::Value = src_resp.0.into_body().into_json().await.unwrap();
+        let dst_resp = client
+            .post("/api/folder-endpoints")
+            .header("Authorization", &auth)
+            .body_json(&serde_json::json!({
+                "id": "", "name": "dst", "kind": "Local", "path": "/tmp/b",
+                "host": "", "port": 22, "username": "", "password": "", "private_key_path": "", "share": ""
+            }))
+            .send()
+            .await;
+        let dst: serde_json::Value = dst_resp.0.into_body().into_json().await.unwrap();
+
+        let job_resp = client
+            .post("/api/folder-jobs")
+            .header("Authorization", &auth)
+            .body_json(&serde_json::json!({
+                "id": "", "name": "j", "source_endpoint_id": src["id"], "dest_endpoint_id": dst["id"],
+                "schedule": {"every_hours": 1, "days_of_week": [], "hour": null, "minute": null, "realtime_poll_minutes": null}
+            }))
+            .send()
+            .await;
+        let job: serde_json::Value = job_resp.0.into_body().into_json().await.unwrap();
+        let job_id = job["id"].as_str().unwrap().to_string();
+        assert_eq!(job["schedule"]["every_hours"], serde_json::json!(1));
+
+        let update_resp = client
+            .put(format!("/api/folder-jobs/{job_id}"))
+            .header("Authorization", &auth)
+            .body_json(&serde_json::json!({
+                "schedule": {"every_hours": null, "days_of_week": [], "hour": null, "minute": null, "realtime_poll_minutes": 15}
+            }))
+            .send()
+            .await;
+        update_resp.assert_status_is_ok();
+
+        let list_resp = client.get("/api/folder-jobs").header("Authorization", &auth).send().await;
+        let list: serde_json::Value = list_resp.0.into_body().into_json().await.unwrap();
+        assert_eq!(list[0]["schedule"]["every_hours"], serde_json::json!(null));
+        assert_eq!(list[0]["schedule"]["realtime_poll_minutes"], serde_json::json!(15));
+
+        let missing_resp = client
+            .put("/api/folder-jobs/does-not-exist")
+            .header("Authorization", &auth)
+            .body_json(&serde_json::json!({
+                "schedule": {"every_hours": 1, "days_of_week": [], "hour": null, "minute": null, "realtime_poll_minutes": null}
+            }))
+            .send()
+            .await;
+        let missing_body: serde_json::Value = missing_resp.0.into_body().into_json().await.unwrap();
+        assert_eq!(missing_body["ok"], serde_json::json!(false));
     }
 }

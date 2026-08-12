@@ -148,6 +148,59 @@ fn check_primary_alive(url: &str) -> bool {
     matches!(client.get(url).send(), Ok(resp) if resp.status().is_success())
 }
 
+/// ユーザー指示(2026-08-12「DATAが増えてきたら自動で時間も増やす機能」)
+/// への対応: 同期にかかった実測時間が現在の間隔設定を超えたら、次回実行が
+/// 前回の完了を待たずに重なってしまうのを防ぐため、間隔を自動的に
+/// 引き上げる。人間にとって覚えやすい段階(3分刻みではなく、実運用で
+/// 選びやすい値)だけを候補にする——実測時間ちょうどではなく、余裕を
+/// 持たせて実測時間の1.5倍以上になる最小の候補を選ぶ。間隔を自動的に
+/// 縮める(短くする)ことはしない——データが後で減っても、それは
+/// ユーザー自身の判断で戻してもらう想定。
+const INTERVAL_TIERS_MINUTES: &[u32] = &[3, 5, 15, 30, 60, 120, 240, 360, 720, 1440];
+
+fn recommended_interval_minutes(duration_minutes: i64) -> u32 {
+    let target = ((duration_minutes as f64) * 1.5).ceil() as i64;
+    for &tier in INTERVAL_TIERS_MINUTES {
+        if tier as i64 >= target {
+            return tier;
+        }
+    }
+    target.max(1) as u32
+}
+
+/// 実行時間(分)が現在のスケジュール間隔を超えていれば、
+/// `recommended_interval_minutes`を使って自動的に間隔を引き上げる。
+/// 変更した場合は人間向けの説明メッセージ(日英併記)を返す——呼び出し側で
+/// 実行結果メッセージに追記し、ログ・通知の両方で経緯が追えるようにする。
+fn auto_widen_schedule_if_too_slow(schedule: &mut crate::model::Schedule, duration_minutes: i64) -> Option<String> {
+    if let Some(mins) = schedule.realtime_poll_minutes {
+        if duration_minutes > mins as i64 {
+            let new_mins = recommended_interval_minutes(duration_minutes);
+            if new_mins > mins {
+                schedule.realtime_poll_minutes = Some(new_mins);
+                return Some(format!(
+                    "auto-adjusted sync interval: {mins} -> {new_mins} min because this sync took ~{duration_minutes} min \
+                     / データ量に応じて同期間隔を自動調整しました: {mins}分 → {new_mins}分(今回の同期に約{duration_minutes}分かかったため)"
+                ));
+            }
+        }
+    } else if let Some(hours) = schedule.every_hours {
+        let hour_minutes = hours as i64 * 60;
+        if duration_minutes > hour_minutes {
+            let new_mins = recommended_interval_minutes(duration_minutes);
+            let new_hours = ((new_mins as f64) / 60.0).ceil() as u32;
+            if new_hours > hours {
+                schedule.every_hours = Some(new_hours.max(1));
+                return Some(format!(
+                    "auto-adjusted sync interval: {hours}h -> {new_hours}h because this sync took ~{duration_minutes} min \
+                     / データ量に応じて同期間隔を自動調整しました: {hours}時間 → {new_hours}時間(今回の同期に約{duration_minutes}分かかったため)"
+                ));
+            }
+        }
+    }
+    None
+}
+
 fn is_due(job: &crate::model::SyncJob, now: &chrono::DateTime<Utc>) -> bool {
     is_due_schedule(&job.schedule, job.last_run_at, now)
 }
@@ -255,8 +308,12 @@ fn execute_job_inner(state: Arc<AppState>, job_id: &str) -> Option<crate::sync_e
     }
 
     let started_at = Utc::now();
-    let outcome = run_job(&mut job, &source, &dest);
+    let mut outcome = run_job(&mut job, &source, &dest);
     let now_auth_failure = !outcome.success && is_auth_failure(&outcome.message);
+    let duration_minutes = ((Utc::now() - started_at).num_seconds().max(0) as f64 / 60.0).ceil() as i64;
+    if let Some(note) = auto_widen_schedule_if_too_slow(&mut job.schedule, duration_minutes) {
+        outcome.message = format!("{} [{note}]", outcome.message);
+    }
     job.last_run_at = Some(Utc::now());
     job.last_run_status = Some(if outcome.success {
         "ok".to_string()
@@ -328,7 +385,11 @@ fn execute_folder_job_inner(state: Arc<AppState>, job_id: &str) -> Option<crate:
     };
 
     let started_at = Utc::now();
-    let outcome = crate::folder_sync::run_folder_sync(&source, &dest);
+    let mut outcome = crate::folder_sync::run_folder_sync(&source, &dest);
+    let duration_minutes = ((Utc::now() - started_at).num_seconds().max(0) as f64 / 60.0).ceil() as i64;
+    if let Some(note) = auto_widen_schedule_if_too_slow(&mut job.schedule, duration_minutes) {
+        outcome.message = format!("{} [{note}]", outcome.message);
+    }
     job.last_run_at = Some(Utc::now());
     job.last_run_status = Some(if outcome.success { "ok".to_string() } else { "error".to_string() });
 
@@ -367,6 +428,61 @@ mod notification_tests {
         assert!(is_auth_failure("SFTP authentication failed for user@host"));
         assert!(!is_auth_failure("repo discovery failed: connection timed out"));
         assert!(!is_auth_failure("2 file(s) copied, 0 unchanged"));
+    }
+
+    /// 2026-08-12追記(ユーザー指示「DATAが増えてきたら自動で時間も
+    /// 増やす機能」)の回帰確認: 実測時間が現在の間隔を超えたら、間隔を
+    /// 段階的候補([3,5,15,30,60,...]分)の中から実測時間の1.5倍以上を
+    /// 満たす最小値へ自動的に引き上げること。
+    #[test]
+    fn recommended_interval_picks_smallest_tier_covering_1_5x_duration() {
+        assert_eq!(recommended_interval_minutes(1), 3); // 1*1.5=1.5 -> ceil 2 -> 3
+        assert_eq!(recommended_interval_minutes(2), 3); // 2*1.5=3 -> ちょうど3
+        assert_eq!(recommended_interval_minutes(10), 15); // 10*1.5=15 -> ちょうど15
+        assert_eq!(recommended_interval_minutes(25), 60); // 25*1.5=37.5 -> 60
+        assert_eq!(recommended_interval_minutes(500), 1440); // 500*1.5=750 -> 720未満なので次の1440
+    }
+
+    #[test]
+    fn auto_widen_schedule_bumps_realtime_poll_minutes_when_run_is_too_slow() {
+        let mut sched = crate::model::Schedule {
+            every_hours: None,
+            days_of_week: vec![],
+            hour: None,
+            minute: None,
+            realtime_poll_minutes: Some(5),
+        };
+        // 実測7分 > 設定5分 なので引き上げが発生するはず。
+        let note = auto_widen_schedule_if_too_slow(&mut sched, 7);
+        assert!(note.is_some(), "expected an auto-adjust note");
+        assert_eq!(sched.realtime_poll_minutes, Some(15));
+
+        // 実測が間隔以下なら変更しない。
+        let mut sched2 = crate::model::Schedule {
+            every_hours: None,
+            days_of_week: vec![],
+            hour: None,
+            minute: None,
+            realtime_poll_minutes: Some(60),
+        };
+        let note2 = auto_widen_schedule_if_too_slow(&mut sched2, 5);
+        assert!(note2.is_none());
+        assert_eq!(sched2.realtime_poll_minutes, Some(60));
+    }
+
+    #[test]
+    fn auto_widen_schedule_bumps_every_hours_when_run_is_too_slow() {
+        let mut sched = crate::model::Schedule {
+            every_hours: Some(1),
+            days_of_week: vec![],
+            hour: None,
+            minute: None,
+            realtime_poll_minutes: None,
+        };
+        // 実測90分 > 設定1時間(60分) なので引き上げが発生するはず。
+        let note = auto_widen_schedule_if_too_slow(&mut sched, 90);
+        assert!(note.is_some());
+        assert!(sched.every_hours.unwrap() > 1);
     }
 }
 
