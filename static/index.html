@@ -28,7 +28,7 @@
 body{font-family:system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;background:#0b0e14;color:#e6e6e6}
 h1{font-size:1.4rem} h2{font-size:1.1rem;margin-top:2rem;border-bottom:1px solid #333;padding-bottom:.3rem}
 label{display:block;font-size:.85rem;color:#b8c0cc;margin-top:.5rem}
-.hint{font-size:.8rem;color:#8a94a3;margin:.1rem 0 .3rem}
+.hint{font-size:1.1rem;color:#8a94a3;margin:.1rem 0 .3rem}
 input,select{padding:.4rem;margin:.1rem 0;background:#1a1f2b;color:#eee;border:1px solid #444;width:100%;box-sizing:border-box;max-width:420px}
 button{
   position:relative;
@@ -63,7 +63,7 @@ button:active{
 table{width:100%;border-collapse:collapse;margin-top:.5rem}
 td,th{border-bottom:1px solid #333;padding:.3rem;text-align:left;font-size:.9rem}
 pre{white-space:pre-wrap;background:#111;padding:.5rem;font-size:.8rem}
-.pill{padding:.1rem .4rem;border-radius:.3rem;font-size:.75rem}
+.pill{padding:.2rem .55rem;border-radius:.4rem;font-size:1.05rem}
 .ok{background:#1e5b2f}.err{background:#7a2020}.conflict{background:#8a5a10}
 .muted{color:#8a94a3;font-size:.9rem}
 .hidden{display:none}
@@ -581,6 +581,14 @@ function lastRunDurationMinutes(jobId, logs){
   const ms = new Date(l.finished_at) - new Date(l.started_at);
   return Math.max(0, Math.round(ms / 60000));
 }
+// 実バグ修正(2026-08-12、ユーザー報告「3分に変更したのに30分のまま」):
+// 30秒ごとの自動更新(renderAll)が、編集中の間隔入力欄をまるごと
+// 新しいHTMLで上書きしてしまい、ユーザーが入力した値・開いていた
+// 編集パネルの状態を問答無用で消していた(タイミングが悪いと保存前に
+// 元の値へ戻る)。開いている編集パネルのジョブIDを記録しておき、
+// 再描画時はそのパネルを閉じず、既に入力されている値を保持したまま
+// 再利用する。
+const openScheduleEdits = new Set();
 function scheduleCell(job, logs, kind){
   const summary = scheduleSummaryText(job.schedule);
   const dur = lastRunDurationMinutes(job.id, logs);
@@ -589,14 +597,19 @@ function scheduleCell(job, logs, kind){
   const configuredMinutes = job.schedule && (job.schedule.realtime_poll_minutes || (job.schedule.every_hours ? job.schedule.every_hours * 60 : null));
   const warn = (dur != null && dur > 0 && configuredMinutes != null && configuredMinutes < dur)
     ? `<div class="hint" style="color:#ffcf6b">${dict[lang].tooShortIntervalWarning.replace(/\{min\}/g, dur)}</div>` : "";
-  const editId = `sched-edit-${kind}-${job.id}`;
-  const inputId = `sched-minutes-${kind}-${job.id}`;
-  const currentMinutes = (job.schedule && job.schedule.realtime_poll_minutes) || "";
+  const editKey = `${kind}-${job.id}`;
+  const editId = `sched-edit-${editKey}`;
+  const inputId = `sched-minutes-${editKey}`;
+  // 既に画面上に開いている編集欄があれば、その入力途中の値を引き継ぐ
+  // (再描画のたびにサーバー値へ戻さない)。無ければサーバー側の現在値。
+  const existingInput = document.getElementById(inputId);
+  const isOpen = openScheduleEdits.has(editKey);
+  const currentMinutes = (existingInput && isOpen) ? existingInput.value : ((job.schedule && job.schedule.realtime_poll_minutes) || "");
   return `<div>${dict[lang].currentInterval}: ${summary}${durHint}${warn}
     <div class="buttons">
       <button type="button" onclick="toggleScheduleEdit('${kind}','${job.id}')">${dict[lang].editSchedule}</button>
     </div>
-    <div id="${editId}" class="hidden">
+    <div id="${editId}" class="${isOpen ? "" : "hidden"}">
       <input type="number" min="1" id="${inputId}" placeholder="${lang === "ja" ? "分" : "minutes"}" value="${currentMinutes}" style="width:5em">
       <div class="buttons">
         <button type="button" onclick="document.getElementById('${inputId}').value=3">3</button>
@@ -610,14 +623,20 @@ function scheduleCell(job, logs, kind){
   </div>`;
 }
 function toggleScheduleEdit(kind, id){
-  document.getElementById(`sched-edit-${kind}-${id}`).classList.toggle("hidden");
+  const editKey = `${kind}-${id}`;
+  const el = document.getElementById(`sched-edit-${editKey}`);
+  el.classList.toggle("hidden");
+  if (el.classList.contains("hidden")) openScheduleEdits.delete(editKey);
+  else openScheduleEdits.add(editKey);
 }
 async function saveSchedule(kind, id){
-  const input = document.getElementById(`sched-minutes-${kind}-${id}`);
+  const editKey = `${kind}-${id}`;
+  const input = document.getElementById(`sched-minutes-${editKey}`);
   const minutes = input.value ? parseInt(input.value) : null;
   const schedule = { every_hours: null, days_of_week: [], hour: null, minute: null, realtime_poll_minutes: minutes };
   const path = kind === "job" ? `api/jobs/${id}` : `api/folder-jobs/${id}`;
   await api(path, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ schedule }) });
+  openScheduleEdits.delete(editKey);
   renderAll();
 }
 
