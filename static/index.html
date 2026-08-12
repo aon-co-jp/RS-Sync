@@ -27,8 +27,8 @@
 <style>
 body{font-family:system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;background:#0b0e14;color:#e6e6e6}
 h1{font-size:1.4rem} h2{font-size:1.1rem;margin-top:2rem;border-bottom:1px solid #333;padding-bottom:.3rem}
-label{display:block;font-size:.85rem;color:#b8c0cc;margin-top:.5rem}
-.hint{font-size:1.1rem;color:#8a94a3;margin:.1rem 0 .3rem}
+label{display:block;font-size:.85rem;color:#fff;margin-top:.5rem}
+.hint{font-size:1.1rem;color:#fff;margin:.1rem 0 .3rem}
 input,select{padding:.4rem;margin:.1rem 0;background:#1a1f2b;color:#eee;border:1px solid #444;width:100%;box-sizing:border-box;max-width:420px}
 button{
   position:relative;
@@ -65,10 +65,10 @@ td,th{border-bottom:1px solid #333;padding:.3rem;text-align:left;font-size:.9rem
 pre{white-space:pre-wrap;background:#111;padding:.5rem;font-size:.8rem}
 .pill{padding:.2rem .55rem;border-radius:.4rem;font-size:1.05rem}
 .ok{background:#1e5b2f}.err{background:#7a2020}.conflict{background:#8a5a10}
-.muted{color:#8a94a3;font-size:.9rem}
+.muted{color:#fff;font-size:.9rem}
 .hidden{display:none}
-a{color:#5fb3ff}
-.demo-notice{color:#fff;font-size:.9rem}
+a{color:#fff}
+.demo-notice{color:#fff;font-size:1.1rem}
 .bright{color:#fff}
 #langBtn{float:right}
 </style>
@@ -76,8 +76,8 @@ a{color:#5fb3ff}
 <body>
 <button id="langBtn">EN</button>
 <h1 data-i18n="title">RS-Sync — Gitリポジトリ同期ツール</h1>
-<p data-i18n="intro">GitHub / open-gitea / Gitea / Gitbucket 間でリポジトリを一方向バックアップ同期・双方向同期します。</p>
-<p id="current-time" class="hint"></p>
+<p data-i18n="intro" style="font-size:1.15rem">GitHub / open-gitea / Gitea / Gitbucket 間でリポジトリを一方向バックアップ同期・双方向同期します。</p>
+<p id="current-time" class="bright" style="font-size:1.4rem"></p>
 <p class="demo-notice">
   ここは管理者向け本番環境です。試しに触ってみたい方はデモ環境をどうぞ:
   <a href="/rs-sync/demo">https://easy-web.tokyo/rs-sync/demo</a><br>
