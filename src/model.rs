@@ -88,6 +88,14 @@ pub struct SyncJob {
     pub last_run_status: Option<String>,
     /// repos currently flagged as conflicted in two-way mode (auto-run paused for them)
     pub conflicted_repos: Vec<String>,
+    /// 2026-08-12追記(ユーザー指示「最初に何分間隔を指定したかと、今は
+    /// 何分間隔かを両方保存して」): ジョブ作成時にユーザーが最初に
+    /// 指定した`realtime_poll_minutes`を、以後`schedule`が手動編集や
+    /// 自動延長(`auto_widen_schedule_if_too_slow`)で変わっても一切
+    /// 上書きしない記録用フィールド。`#[serde(default)]`で既存データとの
+    /// 後方互換を維持。
+    #[serde(default)]
+    pub initial_realtime_poll_minutes: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

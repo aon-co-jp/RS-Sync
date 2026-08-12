@@ -78,6 +78,7 @@ fn one_way_sync_replicates_commit() {
         last_run_at: None,
         last_run_status: None,
         conflicted_repos: vec![],
+        initial_realtime_poll_minutes: None,
     };
 
     let outcome = run_job(&mut job, &source, &dest);
@@ -131,6 +132,7 @@ fn two_way_sync_propagates_source_change_without_conflict() {
         last_run_at: None,
         last_run_status: None,
         conflicted_repos: vec![],
+        initial_realtime_poll_minutes: None,
     };
 
     let first = run_job(&mut job, &source, &dest);
@@ -186,6 +188,7 @@ fn two_way_sync_propagates_dest_only_change_back_to_source() {
         last_run_at: None,
         last_run_status: None,
         conflicted_repos: vec![],
+        initial_realtime_poll_minutes: None,
     };
 
     // Establish a baseline: source has v1, nothing on dest yet.
@@ -257,6 +260,7 @@ fn two_way_sync_detects_conflict_when_both_sides_diverge_and_then_skips_it() {
         last_run_at: None,
         last_run_status: None,
         conflicted_repos: vec![],
+        initial_realtime_poll_minutes: None,
     };
 
     // Baseline sync establishes last_synced = v1 on both sides.

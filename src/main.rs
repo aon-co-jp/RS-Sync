@@ -190,6 +190,7 @@ fn list_jobs(state: Data<&Arc<AppState>>) -> Json<Vec<SyncJob>> {
 
 #[handler]
 fn create_job(state: Data<&Arc<AppState>>, Json(req): Json<NewJobReq>) -> Json<SyncJob> {
+    let initial_realtime_poll_minutes = req.schedule.realtime_poll_minutes;
     let job = SyncJob {
         id: model::new_id(),
         name: req.name,
@@ -202,6 +203,7 @@ fn create_job(state: Data<&Arc<AppState>>, Json(req): Json<NewJobReq>) -> Json<S
         last_run_at: None,
         last_run_status: None,
         conflicted_repos: vec![],
+        initial_realtime_poll_minutes,
     };
     {
         let mut store = state.store.lock().unwrap();
@@ -371,6 +373,7 @@ struct NewFolderJobReq {
 
 #[handler]
 fn create_folder_job(state: Data<&Arc<AppState>>, Json(req): Json<NewFolderJobReq>) -> Json<rs_sync::folder_sync::FolderSyncJob> {
+    let initial_realtime_poll_minutes = req.schedule.realtime_poll_minutes;
     let job = rs_sync::folder_sync::FolderSyncJob {
         id: model::new_id(),
         name: req.name,
@@ -381,6 +384,7 @@ fn create_folder_job(state: Data<&Arc<AppState>>, Json(req): Json<NewFolderJobRe
         enabled: true,
         last_run_at: None,
         last_run_status: None,
+        initial_realtime_poll_minutes,
     };
     {
         let mut store = state.store.lock().unwrap();

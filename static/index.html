@@ -370,7 +370,8 @@ const dict = {
    syncingNow:"同期中！", syncCompleteNow:"同期完了！", waitingNextSync:"次の同期待機中！", scheduleCanceled:"次の同期予約は解除！", syncFailedNow:"同期失敗！",
    statusOk:"正常", statusError:"エラー", statusAuthError:"認証エラー",
    currentTimeLabel:"現在の日時", nextSyncLabel:"次回の同期予定",
-   autoAdjustedNotice:"ℹ️ データ量に応じて間隔が自動的に引き上げられました(前回の同期時間が設定間隔を超えたため)。"},
+   autoAdjustedNotice:"ℹ️ データ量に応じて間隔が自動的に引き上げられました(前回の同期時間が設定間隔を超えたため)。",
+   initialIntervalLabel:"最初に指定した間隔", currentIntervalValueLabel:"現在の間隔"},
  en: {title:"RS-Sync — Git Repository Sync Tool", intro:"One-way backup or two-way sync of repositories across GitHub / open-gitea / Gitea / Gitbucket.",
    loginH:"Login", loginNote:"For security reasons, only the registered admin email can log in.",
    loginEmailLabel:"Admin email address", sendCode:"Send code", loginCodeLabel:"Received code (6 digits)", login:"Log in",
@@ -421,7 +422,8 @@ const dict = {
    syncingNow:"Syncing!", syncCompleteNow:"Sync complete!", waitingNextSync:"Waiting for next sync!", scheduleCanceled:"Next sync schedule canceled!", syncFailedNow:"Sync failed!",
    statusOk:"OK", statusError:"Error", statusAuthError:"Auth error",
    currentTimeLabel:"Current date/time", nextSyncLabel:"Next sync scheduled for",
-   autoAdjustedNotice:"ℹ️ The interval was automatically increased because the last sync took longer than the configured interval."}
+   autoAdjustedNotice:"ℹ️ The interval was automatically increased because the last sync took longer than the configured interval.",
+   initialIntervalLabel:"Originally set to", currentIntervalValueLabel:"Currently"}
 };
 let lang = "ja";
 function applyI18n(){
@@ -516,8 +518,50 @@ document.getElementById("logout-btn").onclick = async ()=>{
   syncAuthVisibility();
 };
 
+// ユーザー指示(2026-08-12「プログラミングの修正があっても、前回の
+// マスター/コピー先URL・トークン設定・間隔設定がリセットされない
+// システムにして」)への対応: サーバー側のアカウント・ジョブデータは
+// もともと`data/store.json`に永続化されており再デプロイでも消えない
+// (これは既存の設計通り)。今回追加したのは、クイック設定フォーム
+// 自体が毎回空欄から入力させる作りだった点——既存のマスター/コピー先
+// アカウントをこのSetを参照して検出し、URL欄を自動入力・トークン欄は
+// 実トークンではなく「設定済み」を示す伏字プレースホルダのみを出し、
+// 送信時に空欄のままなら既存トークンを変更しない(=実トークンを画面へ
+// 一切再表示しない、2026-07-30のセキュリティ修正方針を維持)。
+let cachedAccounts = [];
+let cachedJobs = [];
+function findGithubAccountByOwner(owner){
+  return cachedAccounts.find(a => a.provider === "GitHub" && a.owner === owner);
+}
+function prefillQuickSetupFromExistingAccounts(){
+  const masterUrlInput = document.getElementById("quick-master-url");
+  const masterTokenInput = document.getElementById("quick-master-token");
+  if (masterUrlInput && !masterUrlInput.value) {
+    const master = cachedAccounts.find(a => a.provider === "GitHub" && a.name.startsWith("master-"));
+    if (master) {
+      masterUrlInput.value = master.owner;
+      masterTokenInput.placeholder = master.token_set
+        ? (lang === "ja" ? "●●●●●●●●(設定済み・変更する場合のみ入力)" : "●●●●●●●● (already set — type to change)")
+        : "ghp_...";
+    }
+  }
+  const firstDestRow = document.querySelector(".quick-dest-row");
+  const firstDestUrl = firstDestRow && firstDestRow.querySelector(".quick-dest-url");
+  if (firstDestUrl && !firstDestUrl.value) {
+    const dest = cachedAccounts.find(a => a.provider === "GitHub" && a.name.startsWith("copy-"));
+    if (dest) {
+      firstDestUrl.value = dest.owner;
+      const destTokenInput = firstDestRow.querySelector(".quick-dest-token");
+      destTokenInput.placeholder = dest.token_set
+        ? (lang === "ja" ? "●●●●●●●●(設定済み・変更する場合のみ入力)" : "●●●●●●●● (already set — type to change)")
+        : "ghp_...";
+    }
+  }
+}
+
 async function renderAccounts(){
   const accs = await api("api/accounts");
+  cachedAccounts = accs;
   document.getElementById("accounts").innerHTML = accs.length ? (`<table><tr><th>${dict[lang].source}</th><th>Provider</th><th>Owner</th><th>${dict[lang].tokenCol}</th><th></th></tr>` +
     accs.map(a=>{
       const tokenBadge = a.token_set
@@ -546,6 +590,7 @@ async function renderAccounts(){
   const opts = accs.map(a=>`<option value="${a.id}">${a.name}</option>`).join("");
   document.getElementById("srcSel").innerHTML = opts;
   document.getElementById("dstSel").innerHTML = opts;
+  prefillQuickSetupFromExistingAccounts();
   return accs;
 }
 
@@ -619,6 +664,14 @@ function presetLabel(v){
 const openScheduleEdits = new Set();
 function scheduleCell(job, logs, kind){
   const summary = scheduleSummaryText(job.schedule);
+  // ユーザー指示(2026-08-12「最初に何分間隔で指定したかと、今は何分
+  // 間隔かを両方保存して表示して」)への対応: サーバー側で作成時の値を
+  // `initial_realtime_poll_minutes`として固定保存している(手動編集・
+  // 自動延長では変わらない)。現在値と異なる場合のみ両方表示する。
+  const initialMin = job.initial_realtime_poll_minutes;
+  const currentRealtimeMin = job.schedule && job.schedule.realtime_poll_minutes;
+  const initialVsCurrentHint = (initialMin != null && currentRealtimeMin != null && initialMin !== currentRealtimeMin)
+    ? `<div class="hint">${dict[lang].initialIntervalLabel}: ${initialMin}${lang === "ja" ? "分" : " min"} → ${dict[lang].currentIntervalValueLabel}: ${currentRealtimeMin}${lang === "ja" ? "分" : " min"}</div>` : "";
   const dur = lastRunDurationMinutes(job.id, logs);
   const durHint = dur != null
     ? `<div class="hint">${dict[lang].lastDurationHint}: ${dur < 1 ? "<1" : dur}${lang === "ja" ? "分" : " min"}</div>` : "";
@@ -641,7 +694,7 @@ function scheduleCell(job, logs, kind){
   const existingInput = document.getElementById(inputId);
   const isOpen = openScheduleEdits.has(editKey);
   const currentMinutes = (existingInput && isOpen) ? existingInput.value : ((job.schedule && job.schedule.realtime_poll_minutes) || "");
-  return `<div>${dict[lang].currentInterval}: ${summary}${durHint}${warn}${autoAdjustedHint}
+  return `<div>${dict[lang].currentInterval}: ${summary}${initialVsCurrentHint}${durHint}${warn}${autoAdjustedHint}
     <div class="buttons">
       <button type="button" onclick="toggleScheduleEdit('${kind}','${job.id}')">${dict[lang].editSchedule}</button>
     </div>
@@ -683,6 +736,7 @@ async function saveSchedule(kind, id){
 
 async function renderJobs(accs){
   const jobs = await api("api/jobs");
+  cachedJobs = jobs;
   const logs = await api("api/logs");
   const accName = id => (accs.find(a=>a.id===id)||{}).name || id;
   // 各ジョブについて、直近の実行ログ(エラーメッセージ)を紐付ける
@@ -1036,6 +1090,22 @@ document.getElementById("quick-add-dest").onclick = () => {
 // 最初は1行だけ用意しておく(空欄のクイック設定フォームを最低限使える状態に)。
 document.getElementById("quick-dest-rows").appendChild(makeDestRow());
 
+// 既存のowner一致GitHubアカウントがあれば再利用(トークン欄が空欄なら
+// 既存トークンを変更しない)、無ければ新規作成する。
+async function ensureAccount(owner, token, namePrefix){
+  const existing = findGithubAccountByOwner(owner);
+  if (existing) {
+    if (token) {
+      await api(`api/accounts/${existing.id}`, {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ token })});
+    }
+    return existing;
+  }
+  return await api("api/accounts", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
+    id:"", name:`${namePrefix}${owner}`, provider:"GitHub", api_base:"https://api.github.com",
+    git_base:"https://github.com", owner, token
+  })});
+}
+
 document.getElementById("quickForm").onsubmit = async (e) => {
   e.preventDefault();
   const resultEl = document.getElementById("quick-result");
@@ -1056,29 +1126,40 @@ document.getElementById("quickForm").onsubmit = async (e) => {
     if (!masterOwner) throw new Error(lang === "ja" ? "マスターのURL/組織名を入力してください。" : "Please enter the master URL/org name.");
     if (destRows.length === 0) throw new Error(lang === "ja" ? "コピー先を1つ以上入力してください。" : "Please enter at least one copy-to destination.");
 
-    const masterAccount = await api("api/accounts", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
-      id:"", name:`master-${masterOwner}`, provider:"GitHub", api_base:"https://api.github.com",
-      git_base:"https://github.com", owner:masterOwner, token:masterToken
-    })});
+    // 実バグ修正(2026-08-12、ユーザー指示「プログラムが修正されても
+    // リセットされないシステムにして」への対応): 従来は毎回無条件で
+    // 新規アカウント・新規ジョブをPOSTしていたため、同じ組織名で
+    // クイック設定フォームを再送信するたびに`master-aon-co-jp`のような
+    // 同名アカウント・同名ジョブが重複作成されてしまっていた
+    // (トークン欄を空欄のまま再送信すると、空トークンのアカウントで
+    // 上書きではなく別レコードが増える、という気づきにくい実害)。
+    // 既存のowner一致アカウントがあればそれを再利用し、トークン欄が
+    // 空欄なら変更しない(既存の`token_set`を保持)、既存の
+    // source/dest組み合わせのジョブがあればスケジュールだけ更新する
+    // ——という「再実行しても安全」な設計に修正。
+    const masterAccount = await ensureAccount(masterOwner, masterToken, "master-");
 
     const everyMinutes = document.getElementById("quick-schedule").value;
+    const schedule = { every_hours:null, days_of_week:[], hour:null, minute:null,
+      realtime_poll_minutes: everyMinutes ? parseInt(everyMinutes) : null };
     let created = 0;
     for (const dest of destRows) {
-      const destAccount = await api("api/accounts", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
-        id:"", name:`copy-${dest.owner}`, provider:"GitHub", api_base:"https://api.github.com",
-        git_base:"https://github.com", owner:dest.owner, token:dest.token
-      })});
-      await api("api/jobs", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
-        name:`${masterOwner} -> ${dest.owner}`, source_account_id:masterAccount.id, dest_account_id:destAccount.id,
-        direction:"OneWay", repos:[],
-        schedule:{ every_hours:null, days_of_week:[], hour:null, minute:null,
-          realtime_poll_minutes: everyMinutes ? parseInt(everyMinutes) : null }
-      })});
+      const destAccount = await ensureAccount(dest.owner, dest.token, "copy-");
+      const jobName = `${masterOwner} -> ${dest.owner}`;
+      const existingJob = cachedJobs.find(j => j.source_account_id === masterAccount.id && j.dest_account_id === destAccount.id);
+      if (existingJob) {
+        await api(`api/jobs/${existingJob.id}`, {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ schedule })});
+      } else {
+        await api("api/jobs", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
+          name: jobName, source_account_id:masterAccount.id, dest_account_id:destAccount.id,
+          direction:"OneWay", repos:[], schedule
+        })});
+      }
       created++;
     }
     resultEl.textContent = lang === "ja"
-      ? `${created}件のコピー先へのジョブを作成しました。下の「同期ジョブ」一覧から確認・実行できます。`
-      : `Created jobs for ${created} destination(s). Check the "Sync jobs" list below.`;
+      ? `${created}件のコピー先へのジョブを作成/更新しました。下の「同期ジョブ」一覧から確認・実行できます。`
+      : `Created/updated jobs for ${created} destination(s). Check the "Sync jobs" list below.`;
     document.getElementById("quick-master-url").value = "";
     document.getElementById("quick-master-token").value = "";
     document.getElementById("quick-dest-rows").innerHTML = "";

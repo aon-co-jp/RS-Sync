@@ -81,6 +81,10 @@ pub struct FolderSyncJob {
     pub enabled: bool,
     pub last_run_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_run_status: Option<String>,
+    /// 2026-08-12追記: `model::SyncJob`と同じ理由(最初に指定した間隔を
+    /// 手動編集・自動延長で上書きせず記録し続ける)。
+    #[serde(default)]
+    pub initial_realtime_poll_minutes: Option<u32>,
 }
 
 /// API応答専用ビュー。`password`/秘密鍵パスは一覧に出さない
