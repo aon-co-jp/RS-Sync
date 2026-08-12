@@ -129,6 +129,7 @@ a{color:#fff}
 
   <label for="quick-schedule" data-i18n="quickScheduleLabel">マスターの変化をチェックする間隔</label>
   <select id="quick-schedule">
+    <option value="1" data-i18n="presetRealtime">リアルタイム(1分ごとにチェック)</option>
     <option value="3" data-i18n="preset3">3分ごと</option>
     <option value="5" data-i18n="preset5">5分ごと</option>
     <option value="15" data-i18n="preset15">15分ごと</option>
@@ -215,8 +216,9 @@ a{color:#fff}
 <label for="job-repos" data-i18n="reposLabel">対象リポジトリ名(カンマ区切り、空欄で全リポジトリ)</label>
 <input id="job-repos" name="repos" placeholder="repo1,repo2">
 
-<label for="job-realtime" data-i18n="realtime">何分ごとに自動実行するか(3分・5分・15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)</label>
+<label for="job-realtime" data-i18n="realtime">何分ごとに自動実行するか(リアルタイム・3分・5分・15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)</label>
 <div class="buttons">
+  <button type="button" data-i18n="presetRealtime" onclick="document.getElementById('job-realtime').value=1">リアルタイム(1分ごと)</button>
   <button type="button" data-i18n="preset3" onclick="document.getElementById('job-realtime').value=3">3分ごと</button>
   <button type="button" data-i18n="preset5" onclick="document.getElementById('job-realtime').value=5">5分ごと</button>
   <button type="button" data-i18n="preset15" onclick="document.getElementById('job-realtime').value=15">15分ごと</button>
@@ -292,8 +294,9 @@ a{color:#fff}
 <label for="fj-dest" data-i18n="dest">宛先(コピー先)</label>
 <select name="dest_endpoint_id" id="feDstSel"></select>
 
-<label for="fj-realtime" data-i18n="realtime">何分ごとに自動実行するか(3分・5分・15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)</label>
+<label for="fj-realtime" data-i18n="realtime">何分ごとに自動実行するか(リアルタイム・3分・5分・15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)</label>
 <div class="buttons">
+  <button type="button" data-i18n="presetRealtime" onclick="document.getElementById('fj-realtime').value=1">リアルタイム(1分ごと)</button>
   <button type="button" data-i18n="preset3" onclick="document.getElementById('fj-realtime').value=3">3分ごと</button>
   <button type="button" data-i18n="preset5" onclick="document.getElementById('fj-realtime').value=5">5分ごと</button>
   <button type="button" data-i18n="preset15" onclick="document.getElementById('fj-realtime').value=15">15分ごと</button>
@@ -338,9 +341,9 @@ const dict = {
    oneway:"一方向(ソース→宛先のみ)", twoway:"双方向(両方の変更を反映)",
    reposLabel:"対象リポジトリ名(カンマ区切り、空欄で全リポジトリ)",
    realtime:"何分ごとに自動実行するか(15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)",
-   preset3:"3分ごと", preset5:"5分ごと", preset15:"15分ごと", preset30:"30分ごと", preset60:"1時間ごと", presetClear:"クリア",
+   presetRealtime:"リアルタイム(1分ごと)", preset3:"3分ごと", preset5:"5分ごと", preset15:"15分ごと", preset30:"30分ごと", preset60:"1時間ごと", presetClear:"クリア",
    realtimeHint:"自動実行はWebhookではなくポーリングです(短い間隔ほどサーバーへの負荷とAPIレート制限にご注意ください)。",
-   editSchedule:"間隔を変更", saveSchedule:"保存", currentInterval:"現在の間隔",
+   editSchedule:"間隔を変更", saveSchedule:"保存", currentInterval:"マスターの変化をチェックする間隔",
    lastDurationHint:"前回の同期にかかった時間", tooShortIntervalWarning:"⚠ このデータ量だと同期に約{min}分かかっています。間隔を{min}分以上にすることをおすすめします(短すぎると次の実行と重なる可能性があります)。",
    quickH:"クイック設定: マスター→コピー先(複数可)",
    quickHint:"「このGitHub組織/アカウントをマスターとして、変化があれば以下の組織/アカウントへ全リポジトリをコピー同期する」という設定を、アカウント登録・ジョブ作成を個別に行わずまとめて作成します(コピー先は複数指定可)。一方向(マスター→コピー先のみ)・全リポジトリ・下で選んだ間隔での自動実行として作成されます。",
@@ -366,7 +369,8 @@ const dict = {
    folderJobsH:"フォルダ同期ジョブ", addFolderJob:"ジョブを追加",
    syncingNow:"同期中！", syncCompleteNow:"同期完了！", waitingNextSync:"次の同期待機中！", scheduleCanceled:"次の同期予約は解除！", syncFailedNow:"同期失敗！",
    statusOk:"正常", statusError:"エラー", statusAuthError:"認証エラー",
-   currentTimeLabel:"現在の日時", nextSyncLabel:"次回の同期予定"},
+   currentTimeLabel:"現在の日時", nextSyncLabel:"次回の同期予定",
+   autoAdjustedNotice:"ℹ️ データ量に応じて間隔が自動的に引き上げられました(前回の同期時間が設定間隔を超えたため)。"},
  en: {title:"RS-Sync — Git Repository Sync Tool", intro:"One-way backup or two-way sync of repositories across GitHub / open-gitea / Gitea / Gitbucket.",
    loginH:"Login", loginNote:"For security reasons, only the registered admin email can log in.",
    loginEmailLabel:"Admin email address", sendCode:"Send code", loginCodeLabel:"Received code (6 digits)", login:"Log in",
@@ -388,9 +392,9 @@ const dict = {
    oneway:"One-way (source to destination only)", twoway:"Two-way (changes on both sides are applied)",
    reposLabel:"Target repo names (comma-separated, empty = all repos)",
    realtime:"Run automatically every N minutes (15/30/60-minute presets, or type any custom number. Empty = no automatic runs)",
-   preset3:"Every 3 min", preset5:"Every 5 min", preset15:"Every 15 min", preset30:"Every 30 min", preset60:"Every hour", presetClear:"Clear",
+   presetRealtime:"Realtime (every 1 min)", preset3:"Every 3 min", preset5:"Every 5 min", preset15:"Every 15 min", preset30:"Every 30 min", preset60:"Every hour", presetClear:"Clear",
    realtimeHint:"Automatic runs use polling, not a webhook (shorter intervals mean more server load and API rate-limit risk).",
-   editSchedule:"Change interval", saveSchedule:"Save", currentInterval:"Current interval",
+   editSchedule:"Change interval", saveSchedule:"Save", currentInterval:"Interval to check for master's changes",
    lastDurationHint:"Time the last sync took", tooShortIntervalWarning:"⚠ Given this data size, the sync took about {min} min last time. We recommend setting the interval to at least {min} min (too short risks overlapping with the next run).",
    quickH:"Quick setup: master → copy-to (multiple allowed)",
    quickHint:"Create the accounts and sync job(s) for \"treat this GitHub org/account as the master, and copy all repos to these org(s)/account(s) whenever it changes\" in one step (multiple copy-to destinations allowed). Created as one-way (master to copy-to only), all repos, auto-run at the interval selected below.",
@@ -416,7 +420,8 @@ const dict = {
    folderJobsH:"Folder sync jobs", addFolderJob:"Add job",
    syncingNow:"Syncing!", syncCompleteNow:"Sync complete!", waitingNextSync:"Waiting for next sync!", scheduleCanceled:"Next sync schedule canceled!", syncFailedNow:"Sync failed!",
    statusOk:"OK", statusError:"Error", statusAuthError:"Auth error",
-   currentTimeLabel:"Current date/time", nextSyncLabel:"Next sync scheduled for"}
+   currentTimeLabel:"Current date/time", nextSyncLabel:"Next sync scheduled for",
+   autoAdjustedNotice:"ℹ️ The interval was automatically increased because the last sync took longer than the configured interval."}
 };
 let lang = "ja";
 function applyI18n(){
@@ -581,6 +586,29 @@ function lastRunDurationMinutes(jobId, logs){
   const ms = new Date(l.finished_at) - new Date(l.started_at);
   return Math.max(0, Math.round(ms / 60000));
 }
+// ユーザー指示(2026-08-12「何分ごとという表示は、DATA量に合わせて
+// 変化させて」)への対応: プリセットの選択肢を固定値のまま並べるのでは
+// なく、実測データ量(前回の同期にかかった時間)から算出した「これより
+// 短いと詰まる」下限を、プリセットボタンの有効/無効(グレーアウト)に
+// 反映する。段階(サーバー側`INTERVAL_TIERS_MINUTES`と同じ並び)は
+// [1,3,5,15,30,60,120,240,360,720,1440]分——実測時間の1.5倍以上を
+// 満たす最小の段階を「推奨最小間隔」として、それを下回るボタンは
+// クリックできないようグレーアウトする。
+const SCHEDULE_TIER_MINUTES = [1, 3, 5, 15, 30, 60, 120, 240, 360, 720, 1440];
+function recommendedMinIntervalFor(durationMinutes){
+  if (durationMinutes == null) return null;
+  const target = Math.ceil(durationMinutes * 1.5);
+  for (const tier of SCHEDULE_TIER_MINUTES) {
+    if (tier >= target) return tier;
+  }
+  return target;
+}
+function presetLabel(v){
+  if (v === 1) return dict[lang].presetRealtime;
+  if (v < 60) return lang === "ja" ? `${v}分ごと` : `Every ${v} min`;
+  const h = v / 60;
+  return lang === "ja" ? `${h}時間ごと` : `Every ${h} h`;
+}
 // 実バグ修正(2026-08-12、ユーザー報告「3分に変更したのに30分のまま」):
 // 30秒ごとの自動更新(renderAll)が、編集中の間隔入力欄をまるごと
 // 新しいHTMLで上書きしてしまい、ユーザーが入力した値・開いていた
@@ -597,6 +625,14 @@ function scheduleCell(job, logs, kind){
   const configuredMinutes = job.schedule && (job.schedule.realtime_poll_minutes || (job.schedule.every_hours ? job.schedule.every_hours * 60 : null));
   const warn = (dur != null && dur > 0 && configuredMinutes != null && configuredMinutes < dur)
     ? `<div class="hint" style="color:#ffcf6b">${dict[lang].tooShortIntervalWarning.replace(/\{min\}/g, dur)}</div>` : "";
+  // ユーザー報告(2026-08-12「1分間隔のはずが4分経っても変化しない」)への
+  // 対応: サーバー側の自動延長機能(実測時間が間隔を超えると自動的に
+  // 間隔を引き上げる)が働いたこと自体は正常動作だが、その経緯が実行
+  // ログの中に埋もれていて画面上で気づきにくかった。直近のログに
+  // auto-adjustedの記録があれば、その場で分かるよう明示する。
+  const lastLog = logs.find(l => l.job_id === job.id);
+  const autoAdjustedHint = (lastLog && lastLog.message && lastLog.message.includes("auto-adjusted"))
+    ? `<div class="hint" style="color:#7fd0ff">${dict[lang].autoAdjustedNotice}</div>` : "";
   const editKey = `${kind}-${job.id}`;
   const editId = `sched-edit-${editKey}`;
   const inputId = `sched-minutes-${editKey}`;
@@ -605,18 +641,23 @@ function scheduleCell(job, logs, kind){
   const existingInput = document.getElementById(inputId);
   const isOpen = openScheduleEdits.has(editKey);
   const currentMinutes = (existingInput && isOpen) ? existingInput.value : ((job.schedule && job.schedule.realtime_poll_minutes) || "");
-  return `<div>${dict[lang].currentInterval}: ${summary}${durHint}${warn}
+  return `<div>${dict[lang].currentInterval}: ${summary}${durHint}${warn}${autoAdjustedHint}
     <div class="buttons">
       <button type="button" onclick="toggleScheduleEdit('${kind}','${job.id}')">${dict[lang].editSchedule}</button>
     </div>
     <div id="${editId}" class="${isOpen ? "" : "hidden"}">
       <input type="number" min="1" id="${inputId}" placeholder="${lang === "ja" ? "分" : "minutes"}" value="${currentMinutes}" style="width:5em">
       <div class="buttons">
-        <button type="button" onclick="document.getElementById('${inputId}').value=3">3</button>
-        <button type="button" onclick="document.getElementById('${inputId}').value=5">5</button>
-        <button type="button" onclick="document.getElementById('${inputId}').value=15">15</button>
-        <button type="button" onclick="document.getElementById('${inputId}').value=30">30</button>
-        <button type="button" onclick="document.getElementById('${inputId}').value=60">60</button>
+        ${(() => {
+          const recMin = recommendedMinIntervalFor(dur);
+          return [1, 3, 5, 15, 30, 60].map(v => {
+            const tooShort = recMin != null && v < recMin;
+            const isRecommended = recMin != null && v === recMin;
+            const title = tooShort ? ` title="${dict[lang].tooShortIntervalWarning.replace(/\{min\}/g, dur)}"` : "";
+            const style = isRecommended ? ` style="outline:2px solid #ffcf6b"` : "";
+            return `<button type="button"${tooShort ? " disabled" : ""}${title}${style} onclick="document.getElementById('${inputId}').value=${v}">${presetLabel(v)}</button>`;
+          }).join("");
+        })()}
         <button type="button" onclick="saveSchedule('${kind}','${job.id}')">${dict[lang].saveSchedule}</button>
       </div>
     </div>
