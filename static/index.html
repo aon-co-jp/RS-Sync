@@ -719,9 +719,58 @@ function hasSchedule(j){
   const s = j.schedule;
   return !!(s && (s.every_hours || s.realtime_poll_minutes || (s.days_of_week && s.days_of_week.length)));
 }
+// ユーザー指示(2026-08-12「日時は日本時刻と表示して、世界中の現地
+// 時刻にデフォルトで合わせて」)への対応: `Date`のgetFullYear/getHours等は
+// もともとブラウザが動いている端末のタイムゾーンで返ってくるため、
+// 世界中どこで見ても自動的にその人の現地時刻になる(追加対応不要)。
+// 今回追加したのは「今表示しているのがどのタイムゾーンか」を明示する
+// ラベル——日本(Asia/Tokyo)なら「日本時刻」、それ以外は
+// Intlが返す短縮タイムゾーン名(例: GMT+2、PST)をそのまま使う。
+// ユーザー指示(2026-08-12「世界中の場合は国の名前も英語と現地語でも
+// 表示して」)への対応: ブラウザの言語設定(`navigator.language`、例:
+// "fr-FR"→地域"FR"・言語"fr")の地域コードから、`Intl.DisplayNames`で
+// 国名を解決する(タイムゾーン文字列から国を逆引きするより単純で確実)。
+// 「現地語」はその地域で実際に話されている言語を正確に判定する手段が
+// 無いため、ブラウザの言語設定自体(たいていの利用者は自分の母語/
+// 居住地の言語に設定している)を代用する簡易対応——正直な開示として
+// コード内コメントに明記。英語名と一致する場合(既に英語表示の場合)は
+// 重複を避けて片方のみ返す。
+function countryLabel(){
+  try {
+    const locale = navigator.language || "en-US";
+    const region = (locale.split("-")[1] || locale.split("_")[1] || "").toUpperCase();
+    if (!region) return "";
+    const baseLang = locale.split("-")[0] || locale.split("_")[0] || "en";
+    // ユーザー指示(2026-08-12「イランの場合だけイラン(ペルシャ)の英語で
+    // 表示して」): `Intl.DisplayNames`の既定表記(例: "Iran, Islamic
+    // Republic of"/"Iran")ではなく、イランのみ明示的にこの表記へ上書き。
+    const englishName = region === "IR" ? "Iran (Persia)" : new Intl.DisplayNames(["en"], { type: "region" }).of(region);
+    const localName = new Intl.DisplayNames([baseLang], { type: "region" }).of(region);
+    if (!englishName) return "";
+    if (!localName || localName === englishName) return englishName;
+    return `${englishName} / ${localName}`;
+  } catch (e) {
+    return "";
+  }
+}
+function timeZoneLabel(){
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz === "Asia/Tokyo") return lang === "ja" ? "日本時刻" : "Japan Time";
+    const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" }).formatToParts(new Date());
+    const tzPart = parts.find(p => p.type === "timeZoneName");
+    const zoneName = (tzPart && tzPart.value) || tz;
+    const country = countryLabel();
+    return country ? `${zoneName}, ${country}` : zoneName;
+  } catch (e) {
+    return "";
+  }
+}
 function formatDateTime(d){
   const pad = n => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const base = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const tz = timeZoneLabel();
+  return tz ? `${base} (${tz})` : base;
 }
 function updateCurrentTime(){
   const el = document.getElementById("current-time");
