@@ -689,7 +689,7 @@ async function renderJobs(accs){
   // (`logs`はAPI仕様上すでに新しい順)。ステータスの丸印だけでは
   // 何が起きたか分からない、というユーザー指摘への対応。
   const lastLogFor = jobId => logs.find(l => l.job_id === jobId);
-  document.getElementById("jobs").innerHTML = jobs.length ? (`<table><tr><th>Name</th><th>${dict[lang].source}</th><th>${dict[lang].dest}</th><th>Dir</th><th>Status</th><th>${dict[lang].currentInterval}</th><th></th></tr>` +
+  document.getElementById("jobs").innerHTML = jobs.length ? (`<table><tr><th>Name</th><th>${dict[lang].source}</th><th>${dict[lang].dest}</th><th>Dir</th><th>Status</th><th>${dict[lang].currentTimeLabel}</th><th>${dict[lang].nextSyncLabel}</th><th>${dict[lang].currentInterval}</th><th></th></tr>` +
     jobs.map(j=>{
       const conflictBadges = (j.conflicted_repos||[]).map(r=>`<span class="pill conflict">${r} <a href="#" onclick="resolveConflict('${j.id}','${r}');return false;">[${dict[lang].resolve}]</a></span>`).join(" ");
       const statusPill = syncStatusPill(j);
@@ -698,9 +698,13 @@ async function renderJobs(accs){
         ? `<div class="hint" style="color:#ff9a9a">${escapeHtml(lastLog.message)}</div>` : "";
       const sameAccountWarning = (j.source_account_id === j.dest_account_id)
         ? `<div class="hint" style="color:#ffcf6b">${dict[lang].sameAccountWarning}</div>` : "";
-      return `<tr><td>${j.name}${sameAccountWarning}</td><td>${accName(j.source_account_id)}</td><td>${accName(j.dest_account_id)}</td><td>${j.direction}</td><td>${statusPill} ${conflictBadges}${errorLine}</td><td>${scheduleCell(j, logs, "job")}</td>
+      return `<tr><td>${j.name}${sameAccountWarning}</td><td>${accName(j.source_account_id)}</td><td>${accName(j.dest_account_id)}</td><td>${j.direction}</td><td>${statusPill} ${conflictBadges}${errorLine}</td><td class="row-current-time">${formatDateTime(new Date())}</td><td>${nextSyncCell(j)}</td><td>${scheduleCell(j, logs, "job")}</td>
       <td><button onclick="runJob('${j.id}')">${dict[lang].run}</button><button onclick="delJob('${j.id}')">${dict[lang].del}</button></td></tr>`;
     }).join("") + "</table>") : "<p>-</p>";
+}
+function nextSyncCell(j){
+  const next = estimateNextSync(j);
+  return next ? formatDateTime(next) : "-";
 }
 
 // 実行中/完了直後の一時的な状態表示(ユーザー指示: 「同期中！」
@@ -722,6 +726,12 @@ function formatDateTime(d){
 function updateCurrentTime(){
   const el = document.getElementById("current-time");
   if (el) el.textContent = `${dict[lang].currentTimeLabel}: ${formatDateTime(new Date())}`;
+  // ユーザー指示(2026-08-12「現在の日時をStatusの右にでも表示して」):
+  // ジョブ一覧の各行にも現在時刻列を出す。ページ上部の時計と同じ値を
+  // 使い回すため、1秒ごとのこのtickで一括更新する(行ごとに別々の
+  // setIntervalを持たせない)。
+  const now = formatDateTime(new Date());
+  document.querySelectorAll(".row-current-time").forEach(e => { e.textContent = now; });
 }
 updateCurrentTime();
 setInterval(updateCurrentTime, 1000);
@@ -830,13 +840,13 @@ async function renderFolderJobs(eps){
   const logs = await api("api/logs");
   const epName = id => (eps.find(e=>e.id===id)||{}).name || id;
   const lastLogFor = jobId => logs.find(l => l.job_id === jobId);
-  document.getElementById("folder-jobs").innerHTML = jobs.length ? (`<table><tr><th>Name</th><th>${dict[lang].source}</th><th>${dict[lang].dest}</th><th>Status</th><th>${dict[lang].currentInterval}</th><th></th></tr>` +
+  document.getElementById("folder-jobs").innerHTML = jobs.length ? (`<table><tr><th>Name</th><th>${dict[lang].source}</th><th>${dict[lang].dest}</th><th>Status</th><th>${dict[lang].currentTimeLabel}</th><th>${dict[lang].nextSyncLabel}</th><th>${dict[lang].currentInterval}</th><th></th></tr>` +
     jobs.map(j=>{
       const statusPill = syncStatusPill(j);
       const lastLog = lastLogFor(j.id);
       const errorLine = (j.last_run_status && j.last_run_status !== "ok" && lastLog)
         ? `<div class="hint" style="color:#ff9a9a">${escapeHtml(lastLog.message)}</div>` : "";
-      return `<tr><td>${j.name}</td><td>${epName(j.source_endpoint_id)}</td><td>${epName(j.dest_endpoint_id)}</td><td>${statusPill}${errorLine}</td><td>${scheduleCell(j, logs, "folder")}</td>
+      return `<tr><td>${j.name}</td><td>${epName(j.source_endpoint_id)}</td><td>${epName(j.dest_endpoint_id)}</td><td>${statusPill}${errorLine}</td><td class="row-current-time">${formatDateTime(new Date())}</td><td>${nextSyncCell(j)}</td><td>${scheduleCell(j, logs, "folder")}</td>
       <td><button onclick="runFolderJob('${j.id}')">${dict[lang].run}</button><button onclick="delFolderJob('${j.id}')">${dict[lang].del}</button></td></tr>`;
     }).join("") + "</table>") : "<p>-</p>";
 }
