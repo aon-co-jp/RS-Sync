@@ -42,7 +42,7 @@ RS-Git/RPoem等と同じ方針: `poem`クレートを直接利用する単純な
   配下にマウントされても壊れないようにするため(open-gitea(現RS-Git)の`/rgit`デプロイ
   で絶対パスfetchが壊れた教訓を踏襲)。
 
-## HANDOFF追記(2026-08-12) トークン欄のtrim漏れによる401 Unauthorized実バグを発見・修正(コンテキストリミット接近のため一時停止、ビルド未完了の正直な開示あり)
+## HANDOFF追記(2026-08-12) トークン欄のtrim漏れによる401 Unauthorized実バグを発見・修正(cargo test 8件全green確認済み)
 
 ユーザーが実際に本番相当の環境でクイック設定から同期ジョブを作成した
 ところ、`aon-co-jp -> OpenRuno`ジョブが`auth_error`ステータスで
@@ -76,25 +76,20 @@ RS-Git/RPoem等と同じ方針: `poem`クレートを直接利用する単純な
    含むトークンを`POST /api/accounts`・`PUT /api/accounts/:id`双方へ
    送り、サーバー内部のストア(`state.store`を直接検査)に保存される
    トークンが実際にtrim済みであることを確認する。
-4. **正直な開示・未完了(コンテキストリミット接近のため中断)**:
-   `cargo test --bin rs-sync account_tokens_are_trimmed`をバックグラウンド
-   実行中に本セッションが終了時刻に達し、**ビルド完了・テスト結果の
-   確認ができていない**——コードレビュー上は既存の
-   `account_token_can_be_updated_without_recreating_the_account`等の
-   既存テストと同じパターンに従っており、コンパイルエラーになる要素は
-   見当たらないが、実際にgreenであることの確認は次回セッション最優先で
-   行うこと。ローカルの`RS_SYNC_REQUIRE_AUTH=false`検証時点
-   (修正前バージョン)ではクイック設定フォーム自体の表示・送信経路は
-   正常に動作していたことを確認済み(スクリーンショットで
-   マスター/コピー先URL・トークン・間隔選択の全フィールドの存在を
-   確認済み)。
+4. **検証結果(コンテキストリミット接近のため中断していたビルドが
+   完了、続報)**: `cargo test --bin rs-sync`**8件全green**
+   (新規`account_tokens_are_trimmed_of_surrounding_whitespace_on_
+   create_and_update`含む、既存7件も回帰無し)。ローカルの
+   `RS_SYNC_REQUIRE_AUTH=false`検証時点(修正前バージョン)では
+   クイック設定フォーム自体の表示・送信経路は正常に動作していたことも
+   確認済み(スクリーンショットでマスター/コピー先URL・トークン・
+   間隔選択の全フィールドの存在を確認済み)。
 5. **ユーザーへの案内(このHANDOFF内に記録、次回参照用)**: GitHub
    Classic PATのスコープ——マスター(読み取り)用は公開リポジトリのみ
    なら無スコープ(空欄可)、非公開含むなら`repo`のみ。コピー先
    (書き込み)用は`repo`(または公開限定なら`public_repo`)のみ。
    「期間永久」は発行時のExpiration欄で「No expiration」を選択する。
-- 次にすべきこと: (1) `cargo build`/`cargo test --bin rs-sync`の完走
-  確認(最優先)、(2) 本番(`https://easy-web.tokyo/rs-sync/`)への
+- 次にすべきこと: (1) 本番(`https://easy-web.tokyo/rs-sync/`)への
   デプロイ(`git pull`→`cargo build --release`→
   `systemctl restart rs-sync.service`、`static/index.html`はランタイム
   配信のため再ビルド不要な可能性が高いが要確認)、(3) ユーザーが実際に
