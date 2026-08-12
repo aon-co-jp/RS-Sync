@@ -142,6 +142,16 @@ pub struct AppState {
     /// VPS側インスタンス自体にはこの変数を設定しない(常に自分が
     /// primaryとして動くため、`None`のままでよい)。
     pub primary_healthz_url: Option<String>,
+    /// 2026-08-12追記(実バグ発見: スケジューラの自動実行と「今すぐ同期」
+    /// ボタンの手動実行が同じジョブに対して同時に走ると、両者が同じ
+    /// gitキャッシュディレクトリへ同時に`git clone --mirror`しようと
+    /// 競合し、`cannot copy '.../hooks/pre-applypatch.sample': File
+    /// exists`のようなエラーで片方が失敗する——本番で実際に
+    /// `open-easy-web`リポジトリの同期がこのパターンで失敗しているのを
+    /// 確認した)。ジョブID単位の簡易排他ロック。同じジョブが既に実行中
+    /// なら新しい実行はスキップする(git側のキャッシュ競合を避けるのが
+    /// 目的で、DB的な厳密なロックではない)。
+    pub running_jobs: Mutex<std::collections::HashSet<String>>,
 }
 
 impl AppState {
@@ -159,6 +169,7 @@ impl AppState {
             notify_email: std::env::var("RS_SYNC_ADMIN_EMAIL").ok().filter(|s| !s.is_empty()),
             smtp: crate::mail::SmtpConfig::from_env(),
             primary_healthz_url: std::env::var("RS_SYNC_PRIMARY_HEALTHZ_URL").ok().filter(|s| !s.is_empty()),
+            running_jobs: Mutex::new(std::collections::HashSet::new()),
         }
     }
 

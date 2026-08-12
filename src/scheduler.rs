@@ -210,6 +210,21 @@ fn notify(state: &AppState, subject: &str, body: String) {
 }
 
 pub fn execute_job(state: Arc<AppState>, job_id: &str) -> Option<crate::sync_engine::RunOutcome> {
+    {
+        let mut running = state.running_jobs.lock().unwrap();
+        if !running.insert(job_id.to_string()) {
+            return Some(crate::sync_engine::RunOutcome {
+                success: false,
+                message: "skipped: this job is already running (scheduler tick and manual run overlapped)".to_string(),
+            });
+        }
+    }
+    let result = execute_job_inner(state.clone(), job_id);
+    state.running_jobs.lock().unwrap().remove(job_id);
+    result
+}
+
+fn execute_job_inner(state: Arc<AppState>, job_id: &str) -> Option<crate::sync_engine::RunOutcome> {
     let (mut job, source, dest) = {
         let store = state.store.lock().unwrap();
         let job = store.jobs.iter().find(|j| j.id == job_id)?.clone();
@@ -289,6 +304,21 @@ pub fn execute_job(state: Arc<AppState>, job_id: &str) -> Option<crate::sync_eng
 /// 実行。`execute_job`と同じ構造(取得→実行→結果を反映→ログ追記→保存)を
 /// 踏襲する。
 pub fn execute_folder_job(state: Arc<AppState>, job_id: &str) -> Option<crate::folder_sync::FolderRunOutcome> {
+    {
+        let mut running = state.running_jobs.lock().unwrap();
+        if !running.insert(job_id.to_string()) {
+            return Some(crate::folder_sync::FolderRunOutcome {
+                success: false,
+                message: "skipped: this job is already running (scheduler tick and manual run overlapped)".to_string(),
+            });
+        }
+    }
+    let result = execute_folder_job_inner(state.clone(), job_id);
+    state.running_jobs.lock().unwrap().remove(job_id);
+    result
+}
+
+fn execute_folder_job_inner(state: Arc<AppState>, job_id: &str) -> Option<crate::folder_sync::FolderRunOutcome> {
     let (mut job, source, dest) = {
         let store = state.store.lock().unwrap();
         let job = store.folder_jobs.iter().find(|j| j.id == job_id)?.clone();
