@@ -20,7 +20,20 @@
   var p = location.pathname;
   if (!p.endsWith("/")) {
     location.replace(p + "/" + location.search + location.hash);
+    return;
   }
+  // ユーザー指示(2026-08-13「起動したら自動で強制的にF5キーを押して」):
+  // サーバー側でCache-Control: no-cache, must-revalidateを付与済みだが、
+  // それでも古いタブを開きっぱなしにしていた場合等の保険として、この
+  // タブでまだ一度もリロードしていなければ1回だけ強制リロードする
+  // (`sessionStorage`のフラグでこのタブ内では二度と発火しないように
+  // し、無限リロードループを防ぐ)。
+  try {
+    if (!sessionStorage.getItem("rs_sync_force_reloaded_v1")) {
+      sessionStorage.setItem("rs_sync_force_reloaded_v1", "1");
+      location.reload();
+    }
+  } catch (e) { /* sessionStorage不可の環境(プライベートモード等)では何もしない */ }
 })();
 </script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -137,6 +150,10 @@ a{color:#fff}
     <option value="60" data-i18n="preset60">1時間ごと</option>
     <option value="" data-i18n="quickManualOnly">自動実行しない(手動のみ)</option>
   </select>
+  <div class="buttons">
+    <button type="button" id="quick-schedule-save-btn" data-i18n="saveScheduleOnly" onclick="saveQuickScheduleOnly()">この間隔を保存</button>
+  </div>
+  <p id="quick-schedule-save-result" class="hint"></p>
   <p class="hint" data-i18n="realtimeHint">
     「リアルタイム」はWebhookではなく1分間隔のポーリングです(サーバーへの
     負荷とAPIレート制限にご注意ください)。
@@ -343,6 +360,8 @@ const dict = {
    realtime:"何分ごとに自動実行するか(15分・30分・1時間のプリセット、または任意の分数を直接入力。空欄なら自動実行しない)",
    presetRealtime:"リアルタイム(1分ごと)", preset3:"3分ごと", preset5:"5分ごと", preset15:"15分ごと", preset30:"30分ごと", preset60:"1時間ごと", presetClear:"クリア",
    realtimeHint:"自動実行はWebhookではなくポーリングです(短い間隔ほどサーバーへの負荷とAPIレート制限にご注意ください)。",
+   saveScheduleOnly:"この間隔を保存", scheduleOnlySaved:"保存しました。既存の同期ジョブに反映されます。",
+   scheduleOnlyNoMasterJob:"まだマスターのジョブが作成されていません。まず「この設定でまとめて作成」を実行してください。",
    editSchedule:"間隔を変更", saveSchedule:"保存", currentInterval:"マスターの変化をチェックする間隔",
    lastDurationHint:"前回の同期にかかった時間", tooShortIntervalWarning:"⚠ このデータ量だと同期に約{min}分かかっています。間隔を{min}分以上にすることをおすすめします(短すぎると次の実行と重なる可能性があります)。",
    quickH:"クイック設定: マスター→コピー先(複数可)",
@@ -395,6 +414,8 @@ const dict = {
    realtime:"Run automatically every N minutes (15/30/60-minute presets, or type any custom number. Empty = no automatic runs)",
    presetRealtime:"Realtime (every 1 min)", preset3:"Every 3 min", preset5:"Every 5 min", preset15:"Every 15 min", preset30:"Every 30 min", preset60:"Every hour", presetClear:"Clear",
    realtimeHint:"Automatic runs use polling, not a webhook (shorter intervals mean more server load and API rate-limit risk).",
+   saveScheduleOnly:"Save this interval", scheduleOnlySaved:"Saved. Applied to the existing sync job(s).",
+   scheduleOnlyNoMasterJob:"No master job exists yet. Run \"Create this setup\" first.",
    editSchedule:"Change interval", saveSchedule:"Save", currentInterval:"Interval to check for master's changes",
    lastDurationHint:"Time the last sync took", tooShortIntervalWarning:"⚠ Given this data size, the sync took about {min} min last time. We recommend setting the interval to at least {min} min (too short risks overlapping with the next run).",
    quickH:"Quick setup: master → copy-to (multiple allowed)",
@@ -1113,6 +1134,29 @@ document.getElementById("quick-add-dest").onclick = () => {
 };
 // 最初は1行だけ用意しておく(空欄のクイック設定フォームを最低限使える状態に)。
 document.getElementById("quick-dest-rows").appendChild(makeDestRow());
+
+// ユーザー指示(2026-08-13「マスターの変化をチェックする間隔を変更したら
+// 変更を保存というボタンを作って機能させて」)への対応: フォーム全体を
+// 再送信せず、既存のマスタージョブ(複数のコピー先があれば全て)の
+// 間隔だけをその場で更新する。
+async function saveQuickScheduleOnly(){
+  const resultEl = document.getElementById("quick-schedule-save-result");
+  const master = cachedAccounts.find(a => a.provider === "GitHub" && a.name.startsWith("master-"));
+  const masterJobs = master ? cachedJobs.filter(j => j.source_account_id === master.id) : [];
+  if (!master || masterJobs.length === 0) {
+    resultEl.textContent = dict[lang].scheduleOnlyNoMasterJob;
+    return;
+  }
+  const everyMinutes = document.getElementById("quick-schedule").value;
+  const schedule = { every_hours: null, days_of_week: [], hour: null, minute: null,
+    realtime_poll_minutes: everyMinutes ? parseInt(everyMinutes) : null };
+  for (const job of masterJobs) {
+    await api(`api/jobs/${job.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ schedule }) });
+  }
+  quickScheduleUserTouched = false;
+  resultEl.textContent = dict[lang].scheduleOnlySaved;
+  renderAll();
+}
 
 // 既存のowner一致GitHubアカウントがあれば再利用(トークン欄が空欄なら
 // 既存トークンを変更しない)、無ければ新規作成する。

@@ -434,8 +434,17 @@ async fn run_folder_job_now(state: Data<&Arc<AppState>>, PPath(id): PPath<String
 }
 
 #[handler]
-fn index() -> poem::web::Html<&'static str> {
+fn index() -> Response {
+    // 実バグ修正(2026-08-13、ユーザー報告「F5キーを押したら正常になった」):
+    // このHTMLはRustバイナリに`include_str!`でコンパイル時埋め込みされて
+    // おり、レスポンスに`Cache-Control`ヘッダーが一切無かったため、
+    // ブラウザが古いHTML/JS(修正前のフォーム自動入力バグを含むバージョン)
+    // を独自の判断でキャッシュし続け、手動リロード(F5)しない限り修正が
+    // 反映されなかった。デプロイのたびに毎回ユーザーへ「F5を押してくだ
+    // さい」と案内しなくて済むよう、常に再検証させるヘッダーを付与する。
     poem::web::Html(include_str!("../static/index.html"))
+        .with_header("Cache-Control", "no-cache, must-revalidate")
+        .into_response()
 }
 
 // ---------------- OTP認証エンドポイント ----------------
