@@ -115,6 +115,14 @@ a{color:#fff}
   <input id="login-code" type="text" inputmode="numeric" placeholder="123456">
   <div><button id="login-verify-otp" data-i18n="login">ログイン</button></div>
   <p id="login-result" class="muted" aria-live="polite"></p>
+
+  <details>
+    <summary data-i18n="totpLoginSummary">代わりに認証アプリのコードでログイン(メール不要)</summary>
+    <label class="bright" for="totp-login-code" data-i18n="totpLoginCodeLabel">認証アプリの6桁コード</label>
+    <input id="totp-login-code" type="text" inputmode="numeric" placeholder="123456">
+    <div><button id="totp-login-btn" data-i18n="totpLoginBtn">このコードでログイン</button></div>
+    <p id="totp-login-result" class="muted" aria-live="polite"></p>
+  </details>
 </section>
 
 <section id="auth-logged-in" class="hidden">
@@ -122,6 +130,41 @@ a{color:#fff}
     <span data-i18n="loggedInAs">ログイン中:</span> <strong id="account-email-label"></strong>
     <button id="logout-btn" data-i18n="logout">ログアウト</button>
   </p>
+  <p id="phone-reminder-banner" class="hint hidden" style="color:#ffcf6b"></p>
+
+  <details>
+    <summary data-i18n="accountSettingsSummary">アカウント設定(メールアドレス・電話番号・2段階認証)</summary>
+
+    <label class="bright" for="settings-admin-email" data-i18n="settingsAdminEmailLabel">管理者メールアドレス(主)</label>
+    <input id="settings-admin-email" type="email" placeholder="you@example.com">
+    <div><button id="settings-admin-email-save" data-i18n="save">保存</button></div>
+    <p id="settings-admin-email-result" class="hint"></p>
+
+    <label class="bright" for="settings-backup-email" data-i18n="settingsBackupEmailLabel">予備メールアドレス(任意、こちらでもログインコードを受け取れます)</label>
+    <input id="settings-backup-email" type="email" placeholder="backup@example.com">
+    <div><button id="settings-backup-email-save" data-i18n="save">保存</button></div>
+    <p id="settings-backup-email-result" class="hint"></p>
+
+    <label class="bright" for="settings-admin-phone" data-i18n="settingsPhoneLabel">携帯電話番号(任意、メールアドレスを忘れた際の本人確認用の控え——SMS送信は行いません)</label>
+    <p class="hint" data-i18n="settingsPhoneHint">登録e-mailを忘れた時の為になるべくご登録下さい。 / Please register this if possible, in case you forget your registered email address.</p>
+    <input id="settings-admin-phone" type="tel" placeholder="090-1234-5678">
+    <div><button id="settings-admin-phone-save" data-i18n="save">保存</button></div>
+    <p id="settings-admin-phone-result" class="hint"></p>
+
+    <label class="bright" data-i18n="totpSectionLabel">2段階認証(認証アプリ、メール不要のログイン経路)</label>
+    <p id="totp-status-text" class="hint"></p>
+    <div class="buttons">
+      <button id="totp-setup-btn" data-i18n="totpSetupBtn">2段階認証を設定</button>
+      <button id="totp-disable-btn" data-i18n="totpDisableBtn">2段階認証を無効化</button>
+    </div>
+    <div id="totp-setup-panel" class="hidden">
+      <p class="hint" data-i18n="totpSetupHint">下の文字列を認証アプリ(Google Authenticator等)に手入力で追加し、表示された6桁コードを入力してください。</p>
+      <p id="totp-secret-display" class="bright" style="font-family:monospace"></p>
+      <input id="totp-enable-code" type="text" inputmode="numeric" placeholder="123456">
+      <div><button id="totp-enable-btn" data-i18n="totpEnableBtn">このコードで有効化</button></div>
+    </div>
+    <p id="totp-setup-result" class="hint"></p>
+  </details>
 </section>
 
 <div id="app-section" class="hidden">
@@ -351,6 +394,21 @@ const dict = {
    loginH:"ログイン", loginNote:"セキュリティ上の理由により、登録済みの管理者メールアドレスでのみログインできます。",
    loginEmailLabel:"管理者メールアドレス", sendCode:"コードを送信", loginCodeLabel:"受信したコード(6桁)", login:"ログイン",
    loggedInAs:"ログイン中:", logout:"ログアウト",
+   totpLoginSummary:"代わりに認証アプリのコードでログイン(メール不要)",
+   totpLoginCodeLabel:"認証アプリの6桁コード", totpLoginBtn:"このコードでログイン",
+   accountSettingsSummary:"アカウント設定(メールアドレス・電話番号・2段階認証)",
+   settingsAdminEmailLabel:"管理者メールアドレス(主)",
+   settingsBackupEmailLabel:"予備メールアドレス(任意、こちらでもログインコードを受け取れます)",
+   settingsPhoneLabel:"携帯電話番号(任意、メールアドレスを忘れた際の本人確認用の控え——SMS送信は行いません)",
+   settingsPhoneHint:"登録e-mailを忘れた時の為になるべくご登録下さい。 / Please register this if possible, in case you forget your registered email address.",
+   settingsSaved:"保存しました。", settingsError:"エラー: ",
+   phoneReminderText:"携帯電話番号がまだ登録されていません。登録e-mailを忘れた時の為になるべくご登録下さい。 / You have not registered a phone number yet. Please register one if possible, in case you forget your registered email address.",
+   totpSectionLabel:"2段階認証(認証アプリ、メール不要のログイン経路)",
+   totpEnabledStatus:"有効", totpDisabledStatus:"無効",
+   totpSetupBtn:"2段階認証を設定", totpDisableBtn:"2段階認証を無効化",
+   totpSetupHint:"下の文字列を認証アプリ(Google Authenticator等)に手入力で追加し、表示された6桁コードを入力してください。",
+   totpEnableBtn:"このコードで有効化", totpEnabled:"2段階認証を有効化しました。",
+   totpDisabled:"2段階認証を無効化しました。",
    accountsH:"アカウント", accountsHint:"GitHub・open-gitea・Gitea・GitBucket・GitLab・Bitbucketいずれかのプロバイダで、同期のソース(コピー元)または宛先(コピー先)として使うアカウントを登録します(レンタルサーバー・VPS上で動かしている自前のGitea/GitBucket/open-giteaも、そのURLを指定すれば同様に登録できます)。トークンは同期実行時にサーバー内部でのみ使用し、一覧には表示されません。",
    addAccount:"アカウントを追加",
    accNameLabel:"表示名(自分が分かればどんな名前でも可)", accProviderLabel:"プロバイダ",
@@ -415,6 +473,21 @@ const dict = {
    loginH:"Login", loginNote:"For security reasons, only the registered admin email can log in.",
    loginEmailLabel:"Admin email address", sendCode:"Send code", loginCodeLabel:"Received code (6 digits)", login:"Log in",
    loggedInAs:"Logged in as:", logout:"Log out",
+   totpLoginSummary:"Sign in with an authenticator app code instead (no email needed)",
+   totpLoginCodeLabel:"6-digit authenticator app code", totpLoginBtn:"Sign in with this code",
+   accountSettingsSummary:"Account settings (email addresses, phone number, 2FA)",
+   settingsAdminEmailLabel:"Admin email address (primary)",
+   settingsBackupEmailLabel:"Backup email address (optional, can also receive login codes)",
+   settingsPhoneLabel:"Phone number (optional, kept as a fallback identity check if you forget your email — no SMS is sent)",
+   settingsPhoneHint:"登録e-mailを忘れた時の為になるべくご登録下さい。 / Please register this if possible, in case you forget your registered email address.",
+   settingsSaved:"Saved.", settingsError:"Error: ",
+   phoneReminderText:"携帯電話番号がまだ登録されていません。登録e-mailを忘れた時の為になるべくご登録下さい。 / You have not registered a phone number yet. Please register one if possible, in case you forget your registered email address.",
+   totpSectionLabel:"Two-factor authentication (authenticator app, email-free login path)",
+   totpEnabledStatus:"Enabled", totpDisabledStatus:"Disabled",
+   totpSetupBtn:"Set up 2FA", totpDisableBtn:"Disable 2FA",
+   totpSetupHint:"Add the string below to an authenticator app (e.g. Google Authenticator) manually, then enter the 6-digit code it shows.",
+   totpEnableBtn:"Enable with this code", totpEnabled:"Two-factor authentication enabled.",
+   totpDisabled:"Two-factor authentication disabled.",
    accountsH:"Accounts", accountsHint:"Register accounts (GitHub, open-gitea, Gitea, GitBucket, GitLab, or Bitbucket) to use as a sync source or destination — including self-hosted Gitea/GitBucket/open-gitea instances running on your own rented server or VPS, just point it at that URL. The token is only ever used server-side during sync and is never shown back in the list.",
    addAccount:"Add account",
    accNameLabel:"Display name (anything you'll recognize)", accProviderLabel:"Provider",
@@ -567,6 +640,124 @@ document.getElementById("logout-btn").onclick = async ()=>{
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(EMAIL_KEY);
   syncAuthVisibility();
+};
+
+// ユーザー指示(2026-08-13「e-mail不明になっても2FAでもログイン可能に
+// して」)への対応: メールを一切経由しない代替ログイン経路。
+document.getElementById("totp-login-btn").onclick = async ()=>{
+  const code = document.getElementById("totp-login-code").value.trim();
+  const resultEl = document.getElementById("totp-login-result");
+  try {
+    const r = await fetch("api/auth/totp-login", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({code})});
+    const body = await r.json();
+    if (r.ok && body.token) {
+      localStorage.setItem(TOKEN_KEY, body.token);
+      // TOTPログインは特定のメールアドレスを入力していないため、表示用の
+      // メールアドレスラベルはサーバー側の現在の管理者メールを別途取得する。
+      resultEl.textContent = "";
+      syncAuthVisibility();
+      renderAll();
+      refreshAdminEmailLabel();
+    } else {
+      resultEl.textContent = body.error || "login failed";
+    }
+  } catch(e) { resultEl.textContent = String(e); }
+};
+async function refreshAdminEmailLabel(){
+  try {
+    const data = await api("api/auth/admin-email");
+    if (data.admin_email) {
+      localStorage.setItem(EMAIL_KEY, data.admin_email);
+      document.getElementById("account-email-label").textContent = data.admin_email;
+    }
+  } catch(e) {}
+}
+
+// ユーザー指示(2026-08-13「ログインのe-mailアドレスも変更可能にして」+
+// 「予備メールアドレスでメールアドレスを二個登録する事も可能にして」+
+// 「初回にe-mailと携帯電話番号も登録して」)への対応: アカウント設定
+// パネル一式(主メール変更・予備メール登録・電話番号登録・2段階認証)。
+async function renderAccountSettings(){
+  try {
+    const emailData = await api("api/auth/admin-email");
+    document.getElementById("settings-admin-email").value = emailData.admin_email || "";
+    const backupData = await api("api/auth/backup-email");
+    document.getElementById("settings-backup-email").value = backupData.backup_email || "";
+    const phoneData = await api("api/auth/admin-phone");
+    document.getElementById("settings-admin-phone").value = phoneData.admin_phone || "";
+    // ユーザー指示「携帯電話番号をまだ登録していない方には、登録する
+    // ようにメッセージして」: 未登録なら日英併記のリマインダーを表示。
+    const banner = document.getElementById("phone-reminder-banner");
+    if (!phoneData.admin_phone) {
+      banner.textContent = dict[lang].phoneReminderText;
+      banner.classList.remove("hidden");
+    } else {
+      banner.classList.add("hidden");
+    }
+    const totpData = await api("api/auth/totp/status");
+    document.getElementById("totp-status-text").textContent =
+      `${dict[lang].totpSectionLabel}: ${totpData.enabled ? dict[lang].totpEnabledStatus : dict[lang].totpDisabledStatus}`;
+  } catch(e) { /* not logged in yet, or 401 already handled */ }
+}
+
+document.getElementById("settings-admin-email-save").onclick = async ()=>{
+  const resultEl = document.getElementById("settings-admin-email-result");
+  const admin_email = document.getElementById("settings-admin-email").value.trim();
+  try {
+    await api("api/auth/admin-email", {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({admin_email})});
+    localStorage.setItem(EMAIL_KEY, admin_email);
+    document.getElementById("account-email-label").textContent = admin_email;
+    resultEl.textContent = dict[lang].settingsSaved;
+  } catch(e) { resultEl.textContent = dict[lang].settingsError + String(e); }
+};
+
+document.getElementById("settings-backup-email-save").onclick = async ()=>{
+  const resultEl = document.getElementById("settings-backup-email-result");
+  const backup_email = document.getElementById("settings-backup-email").value.trim();
+  try {
+    await api("api/auth/backup-email", {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({backup_email})});
+    resultEl.textContent = dict[lang].settingsSaved;
+  } catch(e) { resultEl.textContent = dict[lang].settingsError + String(e); }
+};
+
+document.getElementById("settings-admin-phone-save").onclick = async ()=>{
+  const resultEl = document.getElementById("settings-admin-phone-result");
+  const admin_phone = document.getElementById("settings-admin-phone").value.trim();
+  try {
+    await api("api/auth/admin-phone", {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({admin_phone})});
+    resultEl.textContent = dict[lang].settingsSaved;
+    renderAccountSettings();
+  } catch(e) { resultEl.textContent = dict[lang].settingsError + String(e); }
+};
+
+document.getElementById("totp-setup-btn").onclick = async ()=>{
+  const resultEl = document.getElementById("totp-setup-result");
+  try {
+    const data = await api("api/auth/totp/setup", {method:"POST"});
+    document.getElementById("totp-secret-display").textContent = data.secret;
+    document.getElementById("totp-setup-panel").classList.remove("hidden");
+    resultEl.textContent = "";
+  } catch(e) { resultEl.textContent = dict[lang].settingsError + String(e); }
+};
+
+document.getElementById("totp-enable-btn").onclick = async ()=>{
+  const resultEl = document.getElementById("totp-setup-result");
+  const code = document.getElementById("totp-enable-code").value.trim();
+  try {
+    await api("api/auth/totp/enable", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({code})});
+    resultEl.textContent = dict[lang].totpEnabled;
+    document.getElementById("totp-setup-panel").classList.add("hidden");
+    renderAccountSettings();
+  } catch(e) { resultEl.textContent = dict[lang].settingsError + String(e); }
+};
+
+document.getElementById("totp-disable-btn").onclick = async ()=>{
+  const resultEl = document.getElementById("totp-setup-result");
+  try {
+    await api("api/auth/totp/disable", {method:"POST"});
+    resultEl.textContent = dict[lang].totpDisabled;
+    renderAccountSettings();
+  } catch(e) { resultEl.textContent = dict[lang].settingsError + String(e); }
 };
 
 // ユーザー指示(2026-08-12「プログラミングの修正があっても、前回の
@@ -1347,6 +1538,7 @@ async function renderAll(){
     await renderFolderJobs(eps);
     await renderLogs();
     await renderGoogleCalendarStatus();
+    await renderAccountSettings();
   } catch(e) { /* 401 already handled in api() */ }
 }
 

@@ -7,7 +7,7 @@ use poem::{
     Endpoint, EndpointExt, IntoResponse, Middleware, Request, Response, Result as PoemResult, Route, Server,
 };
 use serde::Serialize;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// OTPログイン・セッション状態。`require_auth=false`のときは
 /// (デモ環境向け)全ての認証チェックを素通りさせる——本番/デモの分離は
@@ -15,7 +15,29 @@ use std::sync::Arc;
 /// 常時オンかオフかのどちらかに固定される設計とする。
 pub struct AuthState {
     pub auth: AuthStore,
-    pub admin_email: String,
+    /// 2026-08-13追記(ユーザー指示「ログインのe-mailアドレスも変更可能に
+    /// して」): 従来は起動時に`RS_SYNC_ADMIN_EMAIL`環境変数から読んだ
+    /// 固定値だったが、ログイン中の管理者自身が画面から変更できるように
+    /// `Mutex`化した。変更内容は`AppState.store`(`admin_email_override`)
+    /// にも永続化し、再起動後も新しいメールアドレスでログインできる
+    /// ようにする(環境変数は初回起動時の初期値としてのみ機能する、
+    /// `RS_SYNC_PRIMARY_HEALTHZ_URL`等の既存の「環境変数は初期値、
+    /// 一度APIで変更されたら永続化した値が優先」パターンを踏襲)。
+    pub admin_email: Mutex<String>,
+    /// 2026-08-13追記(ユーザー指示「予備メールアドレスでメールアドレスを
+    /// 二個登録する事も可能にして」): 主メールアドレスに加えて、OTP
+    /// ログインを受け付けるもう1つの連絡先。`request_otp`は主/予備
+    /// いずれのメールアドレスも受け付ける。
+    pub backup_email: Mutex<Option<String>>,
+    /// 2026-08-13追記: 万一メールアドレスを忘れた際の本人確認用連絡先
+    /// (表示・案内のみ、SMS送信機能は持たない)。
+    pub admin_phone: Mutex<Option<String>>,
+    /// 2026-08-13追記(ユーザー指示「e-mail不明になっても2FAでもログイン
+    /// 可能にして」): TOTP(認証アプリ型2段階認証)の秘密鍵と有効/無効。
+    /// 有効な間は`POST /api/auth/totp-login`でメールOTPを経由せず
+    /// ログインできる——メールアドレスへの依存を無くす代替経路。
+    pub totp_secret: Mutex<Option<String>>,
+    pub totp_enabled: Mutex<bool>,
     pub smtp: Option<SmtpConfig>,
     pub require_auth: bool,
     /// 2026-07-30追記(ユーザー指示「このデモでは実際にはログインも
@@ -715,7 +737,12 @@ struct RequestOtpReq {
 #[handler]
 async fn request_otp(auth_state: Data<&Arc<AuthState>>, Json(body): Json<RequestOtpReq>) -> Response {
     let email = body.email.trim().to_string();
-    if email != auth_state.admin_email {
+    // 2026-08-13追記(ユーザー指示「予備メールアドレスでメールアドレスを
+    // 二個登録する事も可能にして」): 主メールアドレスに加え、予備
+    // メールアドレスもOTP要求を受け付ける。
+    let is_registered = email == *auth_state.admin_email.lock().unwrap()
+        || auth_state.backup_email.lock().unwrap().as_deref() == Some(email.as_str());
+    if !is_registered {
         return error_response(StatusCode::FORBIDDEN, "登録されていない連絡先です。 / This contact is not registered.");
     }
     let Some(smtp) = auth_state.smtp.clone() else {
@@ -757,6 +784,182 @@ fn logout(auth_state: Data<&Arc<AuthState>>, req: &Request) -> Response {
         auth_state.auth.logout(&token);
     }
     json_ok(&serde_json::json!({"ok": true}))
+}
+
+/// 2026-08-13追記(ユーザー指示「ログインのe-mailアドレスも変更可能に
+/// して」): ログイン中の管理者が自身のメールアドレスを画面上で変更
+/// できるようにする。既存のセッショントークンは有効なまま(ログイン中に
+/// 突然セッションを失わせない)——次回以降のログイン(OTP要求)から
+/// 新しいメールアドレス宛にのみコードが送られるようになる。
+#[handler]
+fn get_admin_email(auth_state: Data<&Arc<AuthState>>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({"admin_email": *auth_state.admin_email.lock().unwrap()}))
+}
+
+#[derive(serde::Deserialize)]
+struct UpdateAdminEmailReq {
+    admin_email: String,
+}
+
+#[handler]
+fn update_admin_email(
+    state: Data<&Arc<AppState>>,
+    auth_state: Data<&Arc<AuthState>>,
+    Json(req): Json<UpdateAdminEmailReq>,
+) -> Response {
+    let new_email = req.admin_email.trim().to_string();
+    if new_email.is_empty() || !new_email.contains('@') {
+        return error_response(StatusCode::BAD_REQUEST, "無効なメールアドレスです。 / Invalid email address.");
+    }
+    *auth_state.admin_email.lock().unwrap() = new_email.clone();
+    {
+        let mut store = state.store.lock().unwrap();
+        store.admin_email_override = Some(new_email.clone());
+    }
+    state.save();
+    json_ok(&serde_json::json!({"ok": true, "admin_email": new_email}))
+}
+
+/// 2026-08-13追記(ユーザー指示「初回にe-mailと携帯電話番号も登録して、
+/// e-mail不明になっても2FAでもログイン可能にして」): 携帯電話番号は
+/// SMS送信を行わない(表示・保管のみ)——万一メールアドレスを忘れた際、
+/// 管理者自身の本人確認の記録として使う想定。
+#[handler]
+fn get_admin_phone(auth_state: Data<&Arc<AuthState>>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({"admin_phone": *auth_state.admin_phone.lock().unwrap()}))
+}
+
+#[derive(serde::Deserialize)]
+struct UpdateAdminPhoneReq {
+    admin_phone: String,
+}
+
+#[handler]
+fn update_admin_phone(
+    state: Data<&Arc<AppState>>,
+    auth_state: Data<&Arc<AuthState>>,
+    Json(req): Json<UpdateAdminPhoneReq>,
+) -> Response {
+    let phone = req.admin_phone.trim().to_string();
+    let value = if phone.is_empty() { None } else { Some(phone) };
+    *auth_state.admin_phone.lock().unwrap() = value.clone();
+    {
+        let mut store = state.store.lock().unwrap();
+        store.admin_phone_override = value.clone();
+    }
+    state.save();
+    json_ok(&serde_json::json!({"ok": true, "admin_phone": value}))
+}
+
+/// 2026-08-13追記(ユーザー指示「予備メールアドレスでメールアドレスを
+/// 二個登録する事も可能にして」): 主メールアドレスとは別に、OTP要求を
+/// 受け付けるもう1つの連絡先を登録する。
+#[handler]
+fn get_backup_email(auth_state: Data<&Arc<AuthState>>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({"backup_email": *auth_state.backup_email.lock().unwrap()}))
+}
+
+#[derive(serde::Deserialize)]
+struct UpdateBackupEmailReq {
+    backup_email: String,
+}
+
+#[handler]
+fn update_backup_email(
+    state: Data<&Arc<AppState>>,
+    auth_state: Data<&Arc<AuthState>>,
+    Json(req): Json<UpdateBackupEmailReq>,
+) -> Response {
+    let email = req.backup_email.trim().to_string();
+    if !email.is_empty() && !email.contains('@') {
+        return error_response(StatusCode::BAD_REQUEST, "無効なメールアドレスです。 / Invalid email address.");
+    }
+    let value = if email.is_empty() { None } else { Some(email) };
+    *auth_state.backup_email.lock().unwrap() = value.clone();
+    {
+        let mut store = state.store.lock().unwrap();
+        store.backup_email = value.clone();
+    }
+    state.save();
+    json_ok(&serde_json::json!({"ok": true, "backup_email": value}))
+}
+
+/// TOTPセットアップ: 新しい秘密鍵を生成して返す(まだ有効化しない
+/// ——ユーザーが認証アプリへ登録し、実際に生成されたコードで
+/// `totp/enable`を呼んで初めて有効になる、という「動くことを確認して
+/// から切り替える」流れ)。
+#[handler]
+fn totp_setup(auth_state: Data<&Arc<AuthState>>) -> Json<serde_json::Value> {
+    let secret = rs_sync::totp::generate_secret();
+    *auth_state.totp_secret.lock().unwrap() = Some(secret.clone());
+    Json(serde_json::json!({"secret": secret}))
+}
+
+#[derive(serde::Deserialize)]
+struct TotpCodeReq {
+    code: String,
+}
+
+#[handler]
+fn totp_enable(
+    state: Data<&Arc<AppState>>,
+    auth_state: Data<&Arc<AuthState>>,
+    Json(req): Json<TotpCodeReq>,
+) -> Response {
+    let Some(secret) = auth_state.totp_secret.lock().unwrap().clone() else {
+        return error_response(StatusCode::BAD_REQUEST, "先に2段階認証のセットアップを開始してください。 / Start TOTP setup first.");
+    };
+    let now = chrono::Utc::now().timestamp();
+    if !rs_sync::totp::verify_code(&secret, &req.code, now) {
+        return error_response(StatusCode::UNAUTHORIZED, "コードが一致しません。 / Code does not match.");
+    }
+    *auth_state.totp_enabled.lock().unwrap() = true;
+    {
+        let mut store = state.store.lock().unwrap();
+        store.totp_secret = Some(secret);
+        store.totp_enabled = true;
+    }
+    state.save();
+    json_ok(&serde_json::json!({"ok": true}))
+}
+
+#[handler]
+fn totp_disable(state: Data<&Arc<AppState>>, auth_state: Data<&Arc<AuthState>>) -> Response {
+    *auth_state.totp_enabled.lock().unwrap() = false;
+    *auth_state.totp_secret.lock().unwrap() = None;
+    {
+        let mut store = state.store.lock().unwrap();
+        store.totp_enabled = false;
+        store.totp_secret = None;
+    }
+    state.save();
+    json_ok(&serde_json::json!({"ok": true}))
+}
+
+#[handler]
+fn totp_status(auth_state: Data<&Arc<AuthState>>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({"enabled": *auth_state.totp_enabled.lock().unwrap()}))
+}
+
+/// 2026-08-13追記(ユーザー指示「e-mail不明になっても2FAでもログイン
+/// 可能にして」): メールOTPを一切経由しない代替ログイン経路。TOTPが
+/// 有効化されていなければ拒否する(2要素目が存在しないアカウントに
+/// 対してこの経路自体を無意味に開けておかない)。
+#[handler]
+fn totp_login(auth_state: Data<&Arc<AuthState>>, Json(req): Json<TotpCodeReq>) -> Response {
+    if !*auth_state.totp_enabled.lock().unwrap() {
+        return error_response(StatusCode::FORBIDDEN, "2段階認証が有効になっていません。 / TOTP is not enabled.");
+    }
+    let Some(secret) = auth_state.totp_secret.lock().unwrap().clone() else {
+        return error_response(StatusCode::FORBIDDEN, "2段階認証が有効になっていません。 / TOTP is not enabled.");
+    };
+    let now = chrono::Utc::now().timestamp();
+    if !rs_sync::totp::verify_code(&secret, &req.code, now) {
+        return error_response(StatusCode::UNAUTHORIZED, "コードが一致しません。 / Code does not match.");
+    }
+    let email = auth_state.admin_email.lock().unwrap().clone();
+    let token = auth_state.auth.create_session(&email);
+    json_ok(&serde_json::json!({"token": token}))
 }
 
 fn bearer_token(req: &Request) -> Option<String> {
@@ -863,12 +1066,24 @@ fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::End
         .at("/jobs/:id/sync-google-calendar", post(sync_job_to_google_calendar))
         .at("/google/status", get(google_calendar_status))
         .at("/google/login", get(google_calendar_login))
+        .at("/auth/admin-email", get(get_admin_email).put(update_admin_email))
+        .at("/auth/backup-email", get(get_backup_email).put(update_backup_email))
+        .at("/auth/admin-phone", get(get_admin_phone).put(update_admin_phone))
+        .at("/auth/totp/setup", post(totp_setup))
+        .at("/auth/totp/enable", post(totp_enable))
+        .at("/auth/totp/disable", post(totp_disable))
+        .at("/auth/totp/status", get(totp_status))
         .with(RequireAuth { auth_state: auth_state.clone() });
 
     let api = Route::new()
         .at("/auth/request-otp", post(request_otp))
         .at("/auth/verify-otp", post(verify_otp))
         .at("/auth/logout", post(logout))
+        // ユーザー指示「e-mail不明になっても2FAでもログイン可能にして」:
+        // メールOTPを経由しない代替ログイン経路のため、セッション未取得の
+        // 状態から呼べるよう未認証のまま公開する(TOTPコード自体が
+        // 認証情報のため、`RequireAuth`は不要かつ本末転倒になる)。
+        .at("/auth/totp-login", post(totp_login))
         // GoogleのOAuthリダイレクトはこちらのBearerトークンを運べないため
         // 未認証のまま公開する(CSRF対策は`state`パラメータの一致のみ)。
         .at("/auth/google/callback", get(google_calendar_callback))
@@ -892,9 +1107,23 @@ async fn main() -> Result<(), std::io::Error> {
 
     let require_auth = std::env::var("RS_SYNC_REQUIRE_AUTH").map(|v| v != "false" && v != "0").unwrap_or(true);
     let read_only = std::env::var("RS_SYNC_READ_ONLY").map(|v| v == "true" || v == "1").unwrap_or(false);
+    let (initial_admin_email, initial_backup_email, initial_admin_phone, initial_totp_secret, initial_totp_enabled) = {
+        let store = state.store.lock().unwrap();
+        (
+            store.admin_email_override.clone().unwrap_or_else(|| std::env::var("RS_SYNC_ADMIN_EMAIL").unwrap_or_default()),
+            store.backup_email.clone(),
+            store.admin_phone_override.clone(),
+            store.totp_secret.clone(),
+            store.totp_enabled,
+        )
+    };
     let auth_state = Arc::new(AuthState {
         auth: AuthStore::default(),
-        admin_email: std::env::var("RS_SYNC_ADMIN_EMAIL").unwrap_or_default(),
+        admin_email: Mutex::new(initial_admin_email),
+        backup_email: Mutex::new(initial_backup_email),
+        admin_phone: Mutex::new(initial_admin_phone),
+        totp_secret: Mutex::new(initial_totp_secret),
+        totp_enabled: Mutex::new(initial_totp_enabled),
         smtp: SmtpConfig::from_env(),
         require_auth,
         read_only,
@@ -932,7 +1161,11 @@ mod tests {
         let state = Arc::new(AppState::new(data_file.to_str().unwrap()));
         let auth_state = Arc::new(AuthState {
             auth: AuthStore::default(),
-            admin_email: "admin@example.com".to_string(),
+            admin_email: Mutex::new("admin@example.com".to_string()),
+            backup_email: Mutex::new(None),
+            admin_phone: Mutex::new(None),
+            totp_secret: Mutex::new(None),
+            totp_enabled: Mutex::new(false),
             smtp: None,
             require_auth,
             read_only: false,
@@ -1246,5 +1479,106 @@ mod tests {
             .await;
         let missing_body: serde_json::Value = missing_resp.0.into_body().into_json().await.unwrap();
         assert_eq!(missing_body["ok"], serde_json::json!(false));
+    }
+
+    /// 2026-08-13追記(ユーザー指示「予備メールアドレスでメールアドレスを
+    /// 二個登録する事も可能にして」)の回帰確認: 主メールアドレスに加え、
+    /// 登録した予備メールアドレスでもOTP要求が通ること、未登録のメール
+    /// アドレスは引き続き拒否されることを実HTTPで検証する。
+    #[tokio::test]
+    async fn backup_email_can_also_request_otp() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, auth_state) = make_state(&tmp, true);
+        let token = auth_state.auth.create_session("admin@example.com");
+        let app = build_app(state, auth_state);
+        let client = TestClient::new(app);
+        let auth = format!("Bearer {token}");
+
+        let resp = client
+            .put("/api/auth/backup-email")
+            .header("Authorization", &auth)
+            .body_json(&serde_json::json!({"backup_email": "backup@example.com"}))
+            .send()
+            .await;
+        resp.assert_status_is_ok();
+
+        // 予備メールアドレスでもOTP要求が(SMTP未設定のため503にはなるが
+        // "登録されていない連絡先"の403にはならない、という形で)通る。
+        let resp = client
+            .post("/api/auth/request-otp")
+            .body_json(&serde_json::json!({"email": "backup@example.com"}))
+            .send()
+            .await;
+        assert_eq!(resp.0.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        // 未登録のメールアドレスは引き続き拒否される。
+        let resp = client
+            .post("/api/auth/request-otp")
+            .body_json(&serde_json::json!({"email": "someone-else@example.com"}))
+            .send()
+            .await;
+        resp.assert_status(StatusCode::FORBIDDEN);
+    }
+
+    /// 2026-08-13追記(ユーザー指示「e-mail不明になっても2FAでもログイン
+    /// 可能にして」)の回帰確認: セットアップ→有効化→(メールを一切
+    /// 経由しない)TOTPログイン、という一連のフローを実HTTPで検証する。
+    #[tokio::test]
+    async fn totp_setup_enable_and_login_without_email() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, auth_state) = make_state(&tmp, true);
+        let token = auth_state.auth.create_session("admin@example.com");
+        let app = build_app(state, auth_state);
+        let client = TestClient::new(app);
+        let auth = format!("Bearer {token}");
+
+        // 有効化前はtotp-loginで拒否される。
+        let resp = client
+            .post("/api/auth/totp-login")
+            .body_json(&serde_json::json!({"code": "000000"}))
+            .send()
+            .await;
+        resp.assert_status(StatusCode::FORBIDDEN);
+
+        let setup_resp = client.post("/api/auth/totp/setup").header("Authorization", &auth).send().await;
+        setup_resp.assert_status_is_ok();
+        let setup_body: serde_json::Value = setup_resp.0.into_body().into_json().await.unwrap();
+        let secret = setup_body["secret"].as_str().unwrap().to_string();
+
+        let now = chrono::Utc::now().timestamp();
+        let code = rs_sync::totp::code_at(&secret, now).unwrap();
+
+        let enable_resp = client
+            .post("/api/auth/totp/enable")
+            .header("Authorization", &auth)
+            .body_json(&serde_json::json!({"code": code}))
+            .send()
+            .await;
+        enable_resp.assert_status_is_ok();
+
+        let status_resp = client.get("/api/auth/totp/status").header("Authorization", &auth).send().await;
+        let status_body: serde_json::Value = status_resp.0.into_body().into_json().await.unwrap();
+        assert_eq!(status_body["enabled"], serde_json::json!(true));
+
+        // メールを一切経由せず、TOTPコードのみでログインできる。
+        let now2 = chrono::Utc::now().timestamp();
+        let code2 = rs_sync::totp::code_at(&secret, now2).unwrap();
+        let login_resp = client
+            .post("/api/auth/totp-login")
+            .body_json(&serde_json::json!({"code": code2}))
+            .send()
+            .await;
+        login_resp.assert_status_is_ok();
+        let login_body: serde_json::Value = login_resp.0.into_body().into_json().await.unwrap();
+        assert!(login_body["token"].as_str().is_some());
+
+        // 無効化後は拒否される。
+        client.post("/api/auth/totp/disable").header("Authorization", &auth).send().await;
+        let login_resp2 = client
+            .post("/api/auth/totp-login")
+            .body_json(&serde_json::json!({"code": code2}))
+            .send()
+            .await;
+        login_resp2.assert_status(StatusCode::FORBIDDEN);
     }
 }

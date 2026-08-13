@@ -181,6 +181,32 @@ pub struct Store {
     /// `AuthState`と同じ設計)。
     #[serde(default)]
     pub google_tokens: Option<crate::google_calendar::StoredGoogleTokens>,
+    /// 2026-08-13追記(ユーザー指示「ログインのe-mailアドレスも変更可能に
+    /// して」): 管理者がAPI経由で変更した場合にここへ永続化する。
+    /// `None`の間は`RS_SYNC_ADMIN_EMAIL`環境変数の値が使われる
+    /// (初回起動時の初期値としてのみ機能、一度でも変更されたらこちらが
+    /// 優先——他の`*_override`系フィールドと同じパターン)。
+    #[serde(default)]
+    pub admin_email_override: Option<String>,
+    /// 2026-08-13追記(ユーザー指示「予備メールアドレスでメールアドレスを
+    /// 二個登録する事も可能にして」): OTPログインを受け付ける2つ目の
+    /// メールアドレス(任意)。
+    #[serde(default)]
+    pub backup_email: Option<String>,
+    /// 2026-08-13追記(ユーザー指示「初回にe-mailと携帯電話番号も登録して、
+    /// e-mail不明になっても2FAでもログイン可能にして」): 管理者の携帯
+    /// 電話番号(表示・案内のみ、SMS送信機能は無い——万一メールアドレスを
+    /// 忘れた際に本人確認の連絡先として管理者自身が控えておくための項目)。
+    #[serde(default)]
+    pub admin_phone_override: Option<String>,
+    /// TOTP(認証アプリ型2段階認証)の秘密鍵。base32文字列。
+    #[serde(default)]
+    pub totp_secret: Option<String>,
+    /// trueなら`totp_secret`でのログイン(`POST /api/auth/totp-login`、
+    /// メールOTPを経由しない)が有効。メールアドレスを忘れた・受信でき
+    /// なくなった場合の代替ログイン経路として機能する。
+    #[serde(default)]
+    pub totp_enabled: bool,
 }
 
 pub struct AppState {

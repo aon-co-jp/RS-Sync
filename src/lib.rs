@@ -7,3 +7,4 @@ pub mod provider;
 pub mod rustjson;
 pub mod scheduler;
 pub mod sync_engine;
+pub mod totp;
