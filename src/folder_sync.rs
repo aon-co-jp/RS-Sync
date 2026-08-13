@@ -85,6 +85,10 @@ pub struct FolderSyncJob {
     /// 手動編集・自動延長で上書きせず記録し続ける)。
     #[serde(default)]
     pub initial_realtime_poll_minutes: Option<u32>,
+    /// 2026-08-13追記: `model::SyncJob`と同じ理由(Googleカレンダー
+    /// 解除通知の対象判定用フラグ)。
+    #[serde(default)]
+    pub google_synced: bool,
 }
 
 /// API応答専用ビュー。`password`/秘密鍵パスは一覧に出さない

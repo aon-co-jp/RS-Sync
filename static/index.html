@@ -77,6 +77,11 @@ table{width:100%;border-collapse:collapse;margin-top:.5rem}
 td,th{border-bottom:1px solid #333;padding:.3rem;text-align:left;font-size:.9rem}
 pre{white-space:pre-wrap;background:#111;padding:.5rem;font-size:.8rem}
 .pill{padding:.2rem .55rem;border-radius:.4rem;font-size:1.05rem}
+.cal-block{display:inline-block;vertical-align:top;margin:.3rem .6rem .3rem 0}
+.cal-grid{display:grid;grid-template-columns:repeat(7,2em);gap:2px}
+.cal-cell{width:2em;height:2em;padding:0;margin:0;line-height:2em;text-align:center;font-size:.85rem}
+.cal-empty{background:transparent;box-shadow:none;border:none}
+.cal-selected{outline:2px solid #ffcf6b}
 .ok{background:#1e5b2f}.err{background:#7a2020}.conflict{background:#8a5a10}
 .muted{color:#fff;font-size:.9rem}
 .hidden{display:none}
@@ -120,6 +125,11 @@ a{color:#fff}
 </section>
 
 <div id="app-section" class="hidden">
+
+<h2 data-i18n="googleCalendarSectionH">Googleカレンダー連携</h2>
+<p class="hint" data-i18n="googleCalendarDesc">設定したカレンダーから作成した次回予定など、最大1年分の月日と時刻を保存できます。このデータはGoogleカレンダーに保存でき、非公開設定も可能です。Googleアカウントでログインすると、Googleカレンダーへ保存して連動できます。</p>
+<p id="google-calendar-status" class="hint"></p>
+<div class="buttons"><button type="button" id="google-calendar-login-btn" onclick="startGoogleLogin()" data-i18n="googleCalendarLogin">Googleでログイン</button></div>
 
 <h2 data-i18n="quickH">クイック設定: マスター→コピー先(複数可)</h2>
 <p class="muted" data-i18n="quickHint">
@@ -390,7 +400,17 @@ const dict = {
    statusOk:"正常", statusError:"エラー", statusAuthError:"認証エラー",
    currentTimeLabel:"現在の日時", nextSyncLabel:"次回の同期予定",
    autoAdjustedNotice:"ℹ️ データ量に応じて間隔が自動的に引き上げられました(前回の同期時間が設定間隔を超えたため)。",
-   initialIntervalLabel:"最初に指定した間隔", currentIntervalValueLabel:"現在の間隔"},
+   initialIntervalLabel:"最初に指定した間隔", currentIntervalValueLabel:"現在の間隔",
+   scheduleModeLabel:"スケジュール種別", scheduleModeInterval:"間隔(N分/N時間ごと)",
+   scheduleModeWeekly:"週次(曜日ごとに時刻を指定)", scheduleModeMonthly:"月次(カレンダーから日にちを指定)",
+   monthlyCalendarHint:"実行したい日をクリックして選択(複数可、毎月その日番号で繰り返します)。",
+   monthlyDailyCheckbox:"毎日この時刻に実行する(日にち選択を無視)",
+   monthlyTimeLabel:"実行時刻", selectedDatesLabel:"選択中の日付",
+   googleCalendarSectionH:"Googleカレンダー連携",
+   googleCalendarDesc:"設定したカレンダーから作成した次回予定など、最大1年分の月日と時刻を保存できます。このデータはGoogleカレンダーに保存でき、非公開設定も可能です。Googleアカウントでログインすると、Googleカレンダーへ保存して連動できます。",
+   googleCalendarLogin:"Googleでログイン", googleCalendarConnected:"接続済み", googleCalendarNotConnected:"未接続",
+   googleCalendarSyncBtn:"このジョブの予定をGoogleカレンダーへ同期", googleCalendarSyncResult:"Googleカレンダーへ同期しました。",
+   googleCalendarNotConfigured:"このサーバーにはGoogle連携用の資格情報(RS_SYNC_GOOGLE_CLIENT_ID等)が設定されていません。管理者に設定を依頼してください。"},
  en: {title:"RS-Sync — Git Repository Sync Tool", intro:"One-way backup or two-way sync of repositories across GitHub / open-gitea / Gitea / Gitbucket.",
    loginH:"Login", loginNote:"For security reasons, only the registered admin email can log in.",
    loginEmailLabel:"Admin email address", sendCode:"Send code", loginCodeLabel:"Received code (6 digits)", login:"Log in",
@@ -444,7 +464,17 @@ const dict = {
    statusOk:"OK", statusError:"Error", statusAuthError:"Auth error",
    currentTimeLabel:"Current date/time", nextSyncLabel:"Next sync scheduled for",
    autoAdjustedNotice:"ℹ️ The interval was automatically increased because the last sync took longer than the configured interval.",
-   initialIntervalLabel:"Originally set to", currentIntervalValueLabel:"Currently"}
+   initialIntervalLabel:"Originally set to", currentIntervalValueLabel:"Currently",
+   scheduleModeLabel:"Schedule type", scheduleModeInterval:"Interval (every N min/hours)",
+   scheduleModeWeekly:"Weekly (pick a time per weekday)", scheduleModeMonthly:"Monthly (pick day(s) from a calendar)",
+   monthlyCalendarHint:"Click the day(s) you want to run on (repeats on that day number every month).",
+   monthlyDailyCheckbox:"Run at this time every day (ignore day selection)",
+   monthlyTimeLabel:"Time to run", selectedDatesLabel:"Selected dates",
+   googleCalendarSectionH:"Google Calendar integration",
+   googleCalendarDesc:"Dates and times you set on the calendar (up to a year of upcoming events) can be saved. This data can be stored in Google Calendar, with a private visibility option. Sign in with your Google account to save and sync them to Google Calendar.",
+   googleCalendarLogin:"Sign in with Google", googleCalendarConnected:"Connected", googleCalendarNotConnected:"Not connected",
+   googleCalendarSyncBtn:"Sync this job's schedule to Google Calendar", googleCalendarSyncResult:"Synced to Google Calendar.",
+   googleCalendarNotConfigured:"This server has no Google integration credentials configured (RS_SYNC_GOOGLE_CLIENT_ID etc.). Ask your administrator to set them up."}
 };
 let lang = "ja";
 function applyI18n(){
@@ -659,10 +689,32 @@ async function updateAccountToken(id){
 // ユーザー指示(2026-08-12「間隔を何分に設定したかも表示する機能と
 // 変更可能な機能」+「これだけのDATA量だと何分は掛かります、のような
 // オススメ機能」)への対応。
+const WEEKDAY_LABELS_JA = ["日","月","火","水","木","金","土"];
+const WEEKDAY_LABELS_EN = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 function scheduleSummaryText(s){
   if (!s) return dict[lang].quickManualOnly;
   if (s.realtime_poll_minutes) return lang === "ja" ? `${s.realtime_poll_minutes}分ごと` : `Every ${s.realtime_poll_minutes} min`;
   if (s.every_hours) return lang === "ja" ? `${s.every_hours}時間ごと` : `Every ${s.every_hours} h`;
+  if (s.weekly_day_times && s.weekly_day_times.length) {
+    const labels = lang === "ja" ? WEEKDAY_LABELS_JA : WEEKDAY_LABELS_EN;
+    const parts = s.weekly_day_times.map(w => `${labels[w.weekday]} ${String(w.hour).padStart(2,"0")}:${String(w.minute).padStart(2,"0")}`);
+    return (lang === "ja" ? "週次: " : "Weekly: ") + parts.join(", ");
+  }
+  if (s.monthly_daily && s.monthly_hour != null && s.monthly_minute != null) {
+    const hh = String(s.monthly_hour).padStart(2, "0"), mm = String(s.monthly_minute).padStart(2, "0");
+    return lang === "ja" ? `毎日 ${hh}:${mm}` : `Every day at ${hh}:${mm}`;
+  }
+  if (s.monthly_days && s.monthly_days.length && s.monthly_hour != null && s.monthly_minute != null) {
+    const hh = String(s.monthly_hour).padStart(2, "0"), mm = String(s.monthly_minute).padStart(2, "0");
+    const days = s.monthly_days.slice().sort((a,b)=>a-b).join(",");
+    return lang === "ja" ? `毎月${days}日 ${hh}:${mm}` : `Monthly on ${days} at ${hh}:${mm}`;
+  }
+  if (s.specific_dates && s.specific_dates.length && s.specific_dates_hour != null && s.specific_dates_minute != null) {
+    const hh = String(s.specific_dates_hour).padStart(2, "0"), mm = String(s.specific_dates_minute).padStart(2, "0");
+    const dates = s.specific_dates.slice().sort();
+    const preview = dates.slice(0, 2).join(", ") + (dates.length > 2 ? ` +${dates.length - 2}` : "");
+    return lang === "ja" ? `特定日付(${dates.length}件): ${preview} ${hh}:${mm}` : `Specific dates (${dates.length}): ${preview} at ${hh}:${mm}`;
+  }
   if (s.days_of_week && s.days_of_week.length && s.hour != null && s.minute != null) {
     const hh = String(s.hour).padStart(2, "0"), mm = String(s.minute).padStart(2, "0");
     return lang === "ja" ? `曜日指定 ${hh}:${mm}` : `Weekly at ${hh}:${mm}`;
@@ -738,23 +790,56 @@ function scheduleCell(job, logs, kind){
   const existingInput = document.getElementById(inputId);
   const isOpen = openScheduleEdits.has(editKey);
   const currentMinutes = (existingInput && isOpen) ? existingInput.value : ((job.schedule && job.schedule.realtime_poll_minutes) || "");
+  // ユーザー指示(2026-08-13「一ヶ月に一回から数回…一週間に1回から数回…」)
+  // への対応: 編集パネルに「間隔」「週次(曜日ごと)」「月次(カレンダー)」の
+  // 3モードを切り替えるタブを追加。既存ジョブが週次/月次で設定済みなら
+  // そのモードを初期選択する。
+  // 実バグ修正(2026-08-13、実機検証で発見): specific_dates(カレンダーで
+  // 選んだ特定日付)を持つジョブを再度編集画面で開いても"monthly"モードが
+  // 初期選択されず"interval"のままになっていたため、そのまま保存すると
+  // 選択済みのカレンダー予定が無言で消去される実害があった。
+  // specific_dates/specific_dates_hourの有無も判定条件に含める。
+  const initialMode = (job.schedule && job.schedule.weekly_day_times && job.schedule.weekly_day_times.length) ? "weekly"
+    : (job.schedule && (job.schedule.monthly_daily || (job.schedule.monthly_days && job.schedule.monthly_days.length)
+        || (job.schedule.specific_dates && job.schedule.specific_dates.length) || job.schedule.specific_dates_hour != null)) ? "monthly"
+    : "interval";
   return `<div><div class="hint">${dict[lang].currentInterval}: ${summary}</div>${initialVsCurrentHint}${durHint}${warn}${autoAdjustedHint}
     <div class="buttons">
       <button type="button" onclick="toggleScheduleEdit('${kind}','${job.id}')">${dict[lang].editSchedule}</button>
     </div>
     <div id="${editId}" class="${isOpen ? "" : "hidden"}">
-      <input type="number" min="1" id="${inputId}" placeholder="${lang === "ja" ? "分" : "minutes"}" value="${currentMinutes}" style="width:5em">
+      <label>${dict[lang].scheduleModeLabel}</label>
+      <select id="sched-mode-${editKey}" onchange="switchScheduleMode('${editKey}')">
+        <option value="interval"${initialMode==="interval"?" selected":""}>${dict[lang].scheduleModeInterval}</option>
+        <option value="weekly"${initialMode==="weekly"?" selected":""}>${dict[lang].scheduleModeWeekly}</option>
+        <option value="monthly"${initialMode==="monthly"?" selected":""}>${dict[lang].scheduleModeMonthly}</option>
+      </select>
+
+      <div id="sched-panel-interval-${editKey}" class="${initialMode==="interval"?"":"hidden"}">
+        <input type="number" min="1" id="${inputId}" placeholder="${lang === "ja" ? "分" : "minutes"}" value="${currentMinutes}" style="width:5em">
+        <div class="buttons">
+          ${(() => {
+            const recMin = recommendedMinIntervalFor(dur);
+            return [1, 3, 5, 15, 30, 60].map(v => {
+              const tooShort = recMin != null && v < recMin;
+              const isRecommended = recMin != null && v === recMin;
+              const title = tooShort ? ` title="${dict[lang].tooShortIntervalWarning.replace(/\{min\}/g, dur)}"` : "";
+              const style = isRecommended ? ` style="outline:2px solid #ffcf6b"` : "";
+              return `<button type="button"${tooShort ? " disabled" : ""}${title}${style} onclick="document.getElementById('${inputId}').value=${v}">${presetLabel(v)}</button>`;
+            }).join("");
+          })()}
+        </div>
+      </div>
+
+      <div id="sched-panel-weekly-${editKey}" class="${initialMode==="weekly"?"":"hidden"}">
+        ${renderWeeklyPanel(editKey, (job.schedule && job.schedule.weekly_day_times) || [])}
+      </div>
+
+      <div id="sched-panel-monthly-${editKey}" class="${initialMode==="monthly"?"":"hidden"}">
+        ${renderMonthlyPanel(editKey, job.schedule)}
+      </div>
+
       <div class="buttons">
-        ${(() => {
-          const recMin = recommendedMinIntervalFor(dur);
-          return [1, 3, 5, 15, 30, 60].map(v => {
-            const tooShort = recMin != null && v < recMin;
-            const isRecommended = recMin != null && v === recMin;
-            const title = tooShort ? ` title="${dict[lang].tooShortIntervalWarning.replace(/\{min\}/g, dur)}"` : "";
-            const style = isRecommended ? ` style="outline:2px solid #ffcf6b"` : "";
-            return `<button type="button"${tooShort ? " disabled" : ""}${title}${style} onclick="document.getElementById('${inputId}').value=${v}">${presetLabel(v)}</button>`;
-          }).join("");
-        })()}
         <button type="button" onclick="saveSchedule('${kind}','${job.id}')">${dict[lang].saveSchedule}</button>
       </div>
     </div>
@@ -767,14 +852,178 @@ function toggleScheduleEdit(kind, id){
   if (el.classList.contains("hidden")) openScheduleEdits.delete(editKey);
   else openScheduleEdits.add(editKey);
 }
+function switchScheduleMode(editKey){
+  const mode = document.getElementById(`sched-mode-${editKey}`).value;
+  ["interval", "weekly", "monthly"].forEach(m => {
+    const panel = document.getElementById(`sched-panel-${m}-${editKey}`);
+    if (panel) panel.classList.toggle("hidden", m !== mode);
+  });
+}
+
+// ユーザー指示(2026-08-13「一週間に1回から数回の場合は、曜日から選択
+// して、後は24時間の中からその日ごとに選択して」)への対応: 曜日ごとに
+// チェックボックス+時刻入力を並べた週次パネル。
+function renderWeeklyPanel(editKey, existingSlots){
+  const labels = lang === "ja" ? WEEKDAY_LABELS_JA : WEEKDAY_LABELS_EN;
+  return [0,1,2,3,4,5,6].map(wd => {
+    const existing = existingSlots.find(s => s.weekday === wd);
+    const checked = existing ? " checked" : "";
+    const time = existing ? `${String(existing.hour).padStart(2,"0")}:${String(existing.minute).padStart(2,"0")}` : "09:00";
+    return `<div>
+      <label><input type="checkbox" id="sched-wd-${editKey}-${wd}"${checked}> ${labels[wd]}</label>
+      <input type="time" id="sched-wd-time-${editKey}-${wd}" value="${time}">
+    </div>`;
+  }).join("");
+}
+
+// ユーザー指示(2026-08-13「一ヶ月に一回から数回を選択したらカレンダー
+// から今月と来月が表示されて、それが何日で…時間を指定してもらう」+
+// 「定時の時間を指定したらそれを毎日というチェックボックスで指定も
+// 可能」+「設定したカレンダーから次の予定など1年分の月日と時間を保存
+// 出来るようにして」)への対応: ミニカレンダー(実際の曜日配置)を表示し、
+// 日付ボタンをクリックすると「YYYY-MM-DD」形式の絶対日付として選択
+// される(日番号だけを毎月繰り返すのではなく、その年のその月日
+// ちょうど1回だけの予定として保存される)。◀/▶ボタンで最大1年先まで
+// 月を送って選択できる。
+const dateKeyOf = (y, m, d) => `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+const specificDateSelections = {};
+const calendarMonthOffset = {};
+function renderMiniCalendar(editKey, year, month, monthLabel){
+  const first = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const startWeekday = first.getDay();
+  const selected = specificDateSelections[editKey];
+  let cells = "";
+  for (let i = 0; i < startWeekday; i++) cells += `<span class="cal-cell cal-empty"></span>`;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const key = dateKeyOf(year, month, d);
+    const isSel = selected.has(key);
+    cells += `<button type="button" class="cal-cell${isSel ? " cal-selected" : ""}" data-datekey="${key}" onclick="toggleSpecificDate('${editKey}', '${key}')">${d}</button>`;
+  }
+  return `<div class="cal-block"><div class="hint">${monthLabel}</div><div class="cal-grid">${cells}</div></div>`;
+}
+function renderMonthlyPanel(editKey, schedule){
+  if (!specificDateSelections[editKey]) {
+    specificDateSelections[editKey] = new Set((schedule && schedule.specific_dates) || []);
+  }
+  if (calendarMonthOffset[editKey] == null) calendarMonthOffset[editKey] = 0;
+  const offset = calendarMonthOffset[editKey];
+  const now = new Date();
+  const base = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  const nextBase = new Date(now.getFullYear(), now.getMonth() + offset + 1, 1);
+  const localeOpt = { year: "numeric", month: "long" };
+  const monthA = renderMiniCalendar(editKey, base.getFullYear(), base.getMonth(),
+    base.toLocaleString(lang === "ja" ? "ja-JP" : "en-US", localeOpt));
+  const monthB = renderMiniCalendar(editKey, nextBase.getFullYear(), nextBase.getMonth(),
+    nextBase.toLocaleString(lang === "ja" ? "ja-JP" : "en-US", localeOpt));
+  const time = (schedule && schedule.specific_dates_hour != null)
+    ? `${String(schedule.specific_dates_hour).padStart(2,"0")}:${String(schedule.specific_dates_minute).padStart(2,"0")}` : "03:00";
+  const dailyChecked = (schedule && schedule.monthly_daily) ? " checked" : "";
+  const canGoBack = offset > 0;
+  const canGoForward = offset < 11;
+  return `
+    <div class="hint">${dict[lang].monthlyCalendarHint}</div>
+    <div class="buttons">
+      <button type="button" onclick="navigateScheduleCalendar('${editKey}',-1)"${canGoBack ? "" : " disabled"}>&#9664;</button>
+      <button type="button" onclick="navigateScheduleCalendar('${editKey}',1)"${canGoForward ? "" : " disabled"}>&#9654;</button>
+    </div>
+    <div class="buttons">${monthA}${monthB}</div>
+    <div class="hint">${dict[lang].selectedDatesLabel}: ${Array.from(specificDateSelections[editKey]).sort().join(", ") || "-"}</div>
+    <label><input type="checkbox" id="sched-monthly-daily-${editKey}"${dailyChecked} onchange="toggleMonthlyDailyMode('${editKey}')"> ${dict[lang].monthlyDailyCheckbox}</label>
+    <label>${dict[lang].monthlyTimeLabel}</label>
+    <input type="time" id="sched-monthly-time-${editKey}" value="${time}">
+    <div class="buttons">
+      <button type="button" onclick="syncScheduleToGoogleCalendar('${editKey}')">${dict[lang].googleCalendarSyncBtn}</button>
+    </div>
+    <p id="sched-google-sync-result-${editKey}" class="hint"></p>
+  `;
+}
+// ユーザー指示(2026-08-13「設定したカレンダーから...GoogleアカウントでログインしてGoogleカレンダーに保存して連動も可能」)への対応。
+// 保存済みのスケジュール(specific_dates)をGoogleカレンダーへ同期する
+// (先に「保存」ボタンでこのジョブのスケジュール自体を確定させておく
+// 必要がある——このボタンはサーバー側に保存済みのスケジュールを対象に
+// 動くため)。
+async function syncScheduleToGoogleCalendar(editKey){
+  const resultEl = document.getElementById(`sched-google-sync-result-${editKey}`);
+  const kind = editKey.startsWith("job-") ? "job" : "folder";
+  const id = editKey.slice(kind.length + 1);
+  const path = kind === "job" ? `api/jobs/${id}/sync-google-calendar` : `api/folder-jobs/${id}/sync-google-calendar`;
+  resultEl.textContent = "...";
+  try {
+    const result = await api(path, { method: "POST" });
+    resultEl.textContent = result.success ? dict[lang].googleCalendarSyncResult : result.message;
+  } catch (e) { resultEl.textContent = String(e); }
+}
+function toggleSpecificDate(editKey, dateKey){
+  const set = specificDateSelections[editKey];
+  if (set.has(dateKey)) set.delete(dateKey); else set.add(dateKey);
+  document.querySelectorAll(`#sched-panel-monthly-${editKey} .cal-cell[data-datekey="${dateKey}"]`).forEach(el => {
+    el.classList.toggle("cal-selected", set.has(dateKey));
+  });
+  const label = document.querySelector(`#sched-panel-monthly-${editKey} .hint`);
+  // 選択中の日付一覧の表示だけ最小限に更新(パネル全体は再描画しない
+  // ——カレンダーの月送り状態を保つため)。
+  const summaryEl = Array.from(document.querySelectorAll(`#sched-panel-monthly-${editKey} .hint`))
+    .find(el => el.textContent.startsWith(dict[lang].selectedDatesLabel));
+  if (summaryEl) summaryEl.textContent = `${dict[lang].selectedDatesLabel}: ${Array.from(set).sort().join(", ") || "-"}`;
+}
+function navigateScheduleCalendar(editKey, delta){
+  const cur = calendarMonthOffset[editKey] || 0;
+  calendarMonthOffset[editKey] = Math.max(0, Math.min(11, cur + delta));
+  const job = cachedJobs.find(j => `${j.__kind}-${j.id}` === editKey) || findJobByEditKey(editKey);
+  const panel = document.getElementById(`sched-panel-monthly-${editKey}`);
+  if (panel) panel.innerHTML = renderMonthlyPanel(editKey, job ? job.schedule : null);
+}
+function findJobByEditKey(editKey){
+  const kind = editKey.startsWith("job-") ? "job" : "folder";
+  const id = editKey.slice(kind.length + 1);
+  return cachedJobs.find(j => j.id === id);
+}
+function toggleMonthlyDailyMode(editKey){
+  const daily = document.getElementById(`sched-monthly-daily-${editKey}`).checked;
+  const grid = document.getElementById(`sched-panel-monthly-${editKey}`);
+  grid.querySelectorAll(".cal-cell:not(.cal-empty)").forEach(btn => { btn.disabled = daily; });
+}
+
 async function saveSchedule(kind, id){
   const editKey = `${kind}-${id}`;
-  const input = document.getElementById(`sched-minutes-${editKey}`);
-  const minutes = input.value ? parseInt(input.value) : null;
-  const schedule = { every_hours: null, days_of_week: [], hour: null, minute: null, realtime_poll_minutes: minutes };
+  const mode = document.getElementById(`sched-mode-${editKey}`).value;
+  let schedule = { every_hours: null, days_of_week: [], hour: null, minute: null, realtime_poll_minutes: null,
+    weekly_day_times: [], monthly_days: [], monthly_hour: null, monthly_minute: null, monthly_daily: false,
+    specific_dates: [], specific_dates_hour: null, specific_dates_minute: null };
+  if (mode === "interval") {
+    const input = document.getElementById(`sched-minutes-${editKey}`);
+    schedule.realtime_poll_minutes = input.value ? parseInt(input.value) : null;
+  } else if (mode === "weekly") {
+    schedule.weekly_day_times = [0,1,2,3,4,5,6].filter(wd => {
+      const cb = document.getElementById(`sched-wd-${editKey}-${wd}`);
+      return cb && cb.checked;
+    }).map(wd => {
+      const t = document.getElementById(`sched-wd-time-${editKey}-${wd}`).value.split(":");
+      return { weekday: wd, hour: parseInt(t[0]), minute: parseInt(t[1]) };
+    });
+  } else if (mode === "monthly") {
+    // ユーザー指示(2026-08-13「設定したカレンダーから次の予定など1年分の
+    // 月日と時間を保存出来るようにして」)への対応: カレンダーで選んだ
+    // 絶対日付("YYYY-MM-DD")を`specific_dates`として保存する
+    // (`monthly_days`のような「毎月その日番号で繰り返す」方式ではなく、
+    // 実際に選んだその年月日ちょうどに一度だけ実行される)。
+    const daily = document.getElementById(`sched-monthly-daily-${editKey}`).checked;
+    const t = document.getElementById(`sched-monthly-time-${editKey}`).value.split(":");
+    schedule.monthly_daily = daily;
+    schedule.specific_dates_hour = parseInt(t[0]);
+    schedule.specific_dates_minute = parseInt(t[1]);
+    // 「毎日」チェック時は`monthly_hour`/`monthly_minute`(既存の
+    // 「日にちを問わず毎日この時刻」判定ロジック)を使うため両方埋める。
+    schedule.monthly_hour = daily ? parseInt(t[0]) : null;
+    schedule.monthly_minute = daily ? parseInt(t[1]) : null;
+    schedule.specific_dates = daily ? [] : Array.from(specificDateSelections[editKey] || []);
+  }
   const path = kind === "job" ? `api/jobs/${id}` : `api/folder-jobs/${id}`;
   await api(path, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ schedule }) });
   openScheduleEdits.delete(editKey);
+  delete specificDateSelections[editKey];
+  delete calendarMonthOffset[editKey];
   renderAll();
 }
 
@@ -816,7 +1065,11 @@ const syncingJobs = new Set();
 const justSyncedJobs = new Set();
 function hasSchedule(j){
   const s = j.schedule;
-  return !!(s && (s.every_hours || s.realtime_poll_minutes || (s.days_of_week && s.days_of_week.length)));
+  return !!(s && (s.every_hours || s.realtime_poll_minutes || (s.days_of_week && s.days_of_week.length)
+    || (s.weekly_day_times && s.weekly_day_times.length)
+    || (s.monthly_daily && s.monthly_hour != null)
+    || (s.monthly_days && s.monthly_days.length && s.monthly_hour != null)
+    || (s.specific_dates && s.specific_dates.length && s.specific_dates_hour != null)));
 }
 // ユーザー指示(2026-08-12「日時は日本時刻と表示して、世界中の現地
 // 時刻にデフォルトで合わせて」)への対応: `Date`のgetFullYear/getHours等は
@@ -906,6 +1159,48 @@ function estimateNextSync(j){
       if (cand <= now) continue;
       if (s.days_of_week.includes(cand.getDay())) { candidates.push(cand); break; }
     }
+  }
+  if (s.weekly_day_times && s.weekly_day_times.length) {
+    const now = new Date();
+    for (const slot of s.weekly_day_times) {
+      for (let dayOffset = 0; dayOffset < 8; dayOffset++) {
+        const cand = new Date(now);
+        cand.setDate(now.getDate() + dayOffset);
+        cand.setHours(slot.hour, slot.minute, 0, 0);
+        if (cand <= now) continue;
+        if (cand.getDay() === slot.weekday) { candidates.push(cand); break; }
+      }
+    }
+  }
+  if (s.monthly_hour != null && s.monthly_minute != null) {
+    const now = new Date();
+    if (s.monthly_daily) {
+      const cand = new Date(now);
+      cand.setHours(s.monthly_hour, s.monthly_minute, 0, 0);
+      if (cand <= now) cand.setDate(cand.getDate() + 1);
+      candidates.push(cand);
+    } else if (s.monthly_days && s.monthly_days.length) {
+      for (let dayOffset = 0; dayOffset < 62; dayOffset++) {
+        const cand = new Date(now);
+        cand.setDate(now.getDate() + dayOffset);
+        cand.setHours(s.monthly_hour, s.monthly_minute, 0, 0);
+        if (cand <= now) continue;
+        if (s.monthly_days.includes(cand.getDate())) { candidates.push(cand); break; }
+      }
+    }
+  }
+  if (s.specific_dates && s.specific_dates.length && s.specific_dates_hour != null && s.specific_dates_minute != null) {
+    const now = new Date();
+    const upcoming = s.specific_dates
+      .map(d => {
+        const [y, mo, da] = d.split("-").map(n => parseInt(n));
+        const cand = new Date(y, mo - 1, da);
+        cand.setHours(s.specific_dates_hour, s.specific_dates_minute, 0, 0);
+        return cand;
+      })
+      .filter(cand => cand > now)
+      .sort((a, b) => a.getTime() - b.getTime());
+    if (upcoming.length) candidates.push(upcoming[0]);
   }
   if (!candidates.length) return null;
   return new Date(Math.min(...candidates.map(d => d.getTime())));
@@ -1013,6 +1308,35 @@ async function runFolderJob(id){
   }
 }
 
+// ユーザー指示(2026-08-13「GoogleアカウントでログインしてGoogleカレンダー
+// に保存して連動も可能」)への対応。ログインボタンは`<a href>`ではなく
+// JSで認証済みfetchを行い、返ってきたGoogleの認可URLへ手動で遷移する
+// (保護下のAPIのため素のブラウザナビゲーションではAuthorizationヘッダー
+// が付かず401になる実バグを避けるため)。
+async function startGoogleLogin(){
+  try {
+    const data = await api("api/google/login");
+    if (data.url) { window.location.href = data.url; }
+    else { document.getElementById("google-calendar-status").textContent = data.error || dict[lang].googleCalendarNotConfigured; }
+  } catch (e) { /* 401 already handled in api() */ }
+}
+async function renderGoogleCalendarStatus(){
+  const el = document.getElementById("google-calendar-status");
+  const loginBtn = document.getElementById("google-calendar-login-btn");
+  try {
+    const status = await api("api/google/status");
+    if (!status.configured) {
+      el.textContent = dict[lang].googleCalendarNotConfigured;
+      loginBtn.classList.add("hidden");
+    } else {
+      el.innerHTML = status.connected
+        ? `<span class="pill ok">${dict[lang].googleCalendarConnected}</span>`
+        : `<span class="pill err">${dict[lang].googleCalendarNotConnected}</span>`;
+      loginBtn.classList.toggle("hidden", status.connected);
+    }
+  } catch (e) { /* 401 already handled in api() */ }
+}
+
 async function renderAll(){
   renderSchedulerHealth();
   if (!sessionToken() && !authNotRequired) return;
@@ -1022,6 +1346,7 @@ async function renderAll(){
     const eps = await renderFolderEndpoints();
     await renderFolderJobs(eps);
     await renderLogs();
+    await renderGoogleCalendarStatus();
   } catch(e) { /* 401 already handled in api() */ }
 }
 

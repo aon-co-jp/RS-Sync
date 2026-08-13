@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod folder_sync;
+pub mod google_calendar;
 pub mod mail;
 pub mod model;
 pub mod provider;

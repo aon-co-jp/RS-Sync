@@ -33,6 +33,14 @@ fn empty_schedule() -> Schedule {
         hour: None,
         minute: None,
         realtime_poll_minutes: None,
+        weekly_day_times: vec![],
+        monthly_days: vec![],
+        monthly_hour: None,
+        monthly_minute: None,
+        monthly_daily: false,
+        specific_dates: vec![],
+        specific_dates_hour: None,
+        specific_dates_minute: None,
     }
 }
 
@@ -79,6 +87,7 @@ fn one_way_sync_replicates_commit() {
         last_run_status: None,
         conflicted_repos: vec![],
         initial_realtime_poll_minutes: None,
+        google_synced: false,
     };
 
     let outcome = run_job(&mut job, &source, &dest);
@@ -133,6 +142,7 @@ fn two_way_sync_propagates_source_change_without_conflict() {
         last_run_status: None,
         conflicted_repos: vec![],
         initial_realtime_poll_minutes: None,
+        google_synced: false,
     };
 
     let first = run_job(&mut job, &source, &dest);
@@ -189,6 +199,7 @@ fn two_way_sync_propagates_dest_only_change_back_to_source() {
         last_run_status: None,
         conflicted_repos: vec![],
         initial_realtime_poll_minutes: None,
+        google_synced: false,
     };
 
     // Establish a baseline: source has v1, nothing on dest yet.
@@ -261,6 +272,7 @@ fn two_way_sync_detects_conflict_when_both_sides_diverge_and_then_skips_it() {
         last_run_status: None,
         conflicted_repos: vec![],
         initial_realtime_poll_minutes: None,
+        google_synced: false,
     };
 
     // Baseline sync establishes last_synced = v1 on both sides.

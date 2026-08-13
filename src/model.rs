@@ -61,7 +61,21 @@ pub enum Direction {
     TwoWay,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// 2026-08-13追記(ユーザー指示「一週間に1回から数回の場合は、曜日から
+/// 選択して、後は24時間の中からその日ごとに選択して」): 週次スケジュール
+/// で曜日ごとに異なる時刻を指定できるようにするための1エントリ。
+/// 既存の`days_of_week`+`hour`+`minute`(全曜日で単一時刻を共有)とは別に
+/// 併用可能——後方互換のため既存フィールドは残したまま、より柔軟な
+/// 表現をこちらへ追加する形にした。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WeeklyDayTime {
+    /// 0=Sunday..6=Saturday(既存`days_of_week`と同じ規約)
+    pub weekday: u8,
+    pub hour: u8,
+    pub minute: u8,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Schedule {
     /// run every N hours if Some
     pub every_hours: Option<u32>,
@@ -71,6 +85,39 @@ pub struct Schedule {
     pub minute: Option<u8>,
     /// poll for source changes every N minutes and sync immediately (best-effort realtime)
     pub realtime_poll_minutes: Option<u32>,
+    /// 2026-08-13追記: 曜日ごとに異なる時刻を指定する週次スケジュール
+    /// (`days_of_week`+`hour`+`minute`の「全曜日で同一時刻」制約を
+    /// 緩和したもの)。`#[serde(default)]`で既存データとの後方互換を維持。
+    #[serde(default)]
+    pub weekly_day_times: Vec<WeeklyDayTime>,
+    /// 2026-08-13追記(ユーザー指示「一ヶ月に一回から数回を選択したら
+    /// カレンダーから...それが何日で...時間を指定してもらう」): 毎月の
+    /// 実行日(1〜31)。月をまたいで同じ日番号で繰り返す(特定年月の
+    /// 1回限りの日付ではない)。
+    #[serde(default)]
+    pub monthly_days: Vec<u8>,
+    #[serde(default)]
+    pub monthly_hour: Option<u8>,
+    #[serde(default)]
+    pub monthly_minute: Option<u8>,
+    /// 2026-08-13追記(ユーザー指示「定時の時間を指定したらそれを毎日と
+    /// 言うチェックボックスで指定も可能」): trueの場合`monthly_days`を
+    /// 無視し、`monthly_hour`:`monthly_minute`に毎日実行する
+    /// (月次UIから作った「毎日この時刻に実行」設定)。
+    #[serde(default)]
+    pub monthly_daily: bool,
+    /// 2026-08-13追記(ユーザー指示「設定したカレンダーから次の予定など
+    /// 1年分の月日と時間を保存出来るようにして」): `monthly_days`
+    /// (日番号のみ、毎月繰り返す)とは別に、特定の年月日
+    /// (`"YYYY-MM-DD"`形式、最大1年先まで画面から選択可能)を複数
+    /// 保存できる一回限りの予定。同じ日付は年をまたいでも一度しか
+    /// 一致しないため、真の「特定の日」の予定として機能する。
+    #[serde(default)]
+    pub specific_dates: Vec<String>,
+    #[serde(default)]
+    pub specific_dates_hour: Option<u8>,
+    #[serde(default)]
+    pub specific_dates_minute: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +143,13 @@ pub struct SyncJob {
     /// 後方互換を維持。
     #[serde(default)]
     pub initial_realtime_poll_minutes: Option<u32>,
+    /// 2026-08-13追記(ユーザー指示「rs-syncの設定を解除したら、設定を
+    /// 解除しましたと...Googleカレンダーに自動で書いて」): このジョブの
+    /// 特定日付スケジュールをGoogleカレンダーへ同期したことがあるかの
+    /// フラグ。trueのジョブの月次/特定日スケジュールが解除・削除された
+    /// 際、解除通知イベントをカレンダーへ書き込む対象になる。
+    #[serde(default)]
+    pub google_synced: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,6 +175,12 @@ pub struct Store {
     pub folder_endpoints: Vec<crate::folder_sync::FolderEndpoint>,
     #[serde(default)]
     pub folder_jobs: Vec<crate::folder_sync::FolderSyncJob>,
+    /// 2026-08-13追記(ユーザー指示「GoogleアカウントでログインしてGoogle
+    /// カレンダーに保存して連動も可能」): OAuthトークン(単一の管理者
+    /// アカウントのみを想定、このアプリ自体が単一管理者制のため既存の
+    /// `AuthState`と同じ設計)。
+    #[serde(default)]
+    pub google_tokens: Option<crate::google_calendar::StoredGoogleTokens>,
 }
 
 pub struct AppState {
@@ -160,6 +220,11 @@ pub struct AppState {
     /// なら新しい実行はスキップする(git側のキャッシュ競合を避けるのが
     /// 目的で、DB的な厳密なロックではない)。
     pub running_jobs: Mutex<std::collections::HashSet<String>>,
+    /// 2026-08-13追記: GoogleカレンダーOAuth CSRF対策用のワンタイム
+    /// state値。ログイン開始時に生成・保持し、コールバック時に一致
+    /// するか検証する(Googleからのリダイレクトは独自のBearerトークンを
+    /// 運べないため、この`state`パラメータが唯一のCSRF対策)。
+    pub google_oauth_state: Mutex<Option<String>>,
 }
 
 impl AppState {
@@ -178,6 +243,7 @@ impl AppState {
             smtp: crate::mail::SmtpConfig::from_env(),
             primary_healthz_url: std::env::var("RS_SYNC_PRIMARY_HEALTHZ_URL").ok().filter(|s| !s.is_empty()),
             running_jobs: Mutex::new(std::collections::HashSet::new()),
+            google_oauth_state: Mutex::new(None),
         }
     }
 

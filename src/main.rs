@@ -61,6 +61,171 @@ fn json_ok_with_status(status: StatusCode, value: &serde_json::Value) -> Respons
     Response::builder().status(status).content_type("application/json").body(value.to_string())
 }
 
+// ---------------- Googleカレンダー連携(2026-08-13新設) ----------------
+// ユーザー指示「設定したカレンダーから次の予定など1年分の月日と時間を
+// 保存出来るようにして、そのDATAは...GoogleアカウントでログインしてGoogle
+// カレンダーに保存して連動も可能」への対応。Googleドライブは対象外
+// (ユーザー指示「Googleドライブは中止」)。
+
+#[handler]
+fn google_calendar_status(state: Data<&Arc<AppState>>) -> Json<serde_json::Value> {
+    let configured = rs_sync::google_calendar::GoogleOAuthConfig::from_env().is_some();
+    let connected = state.store.lock().unwrap().google_tokens.is_some();
+    Json(serde_json::json!({"configured": configured, "connected": connected}))
+}
+
+/// 実バグ修正(実装中に発見): このエンドポイントはBearerセッション
+/// トークン必須の保護下にあるため、単純な`<a href>`によるブラウザの
+/// 素のナビゲーションではAuthorizationヘッダーが付与されず401になる。
+/// JSON({"url": "..."})でGoogleの認可URLを返し、呼び出し側
+/// (`api()`で認証済みfetch)が`window.location.href`へ代入して
+/// 手動で遷移させる設計にした(HTTPリダイレクトそのものは使わない)。
+#[handler]
+fn google_calendar_login(state: Data<&Arc<AppState>>) -> Response {
+    let Some(config) = rs_sync::google_calendar::GoogleOAuthConfig::from_env() else {
+        return json_ok_with_status(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &serde_json::json!({"error": "Google OAuth is not configured on this server (RS_SYNC_GOOGLE_CLIENT_ID/RS_SYNC_GOOGLE_CLIENT_SECRET)"}),
+        );
+    };
+    let state_token = model::new_id();
+    *state.google_oauth_state.lock().unwrap() = Some(state_token.clone());
+    let url = rs_sync::google_calendar::build_auth_url(&config, &state_token);
+    json_ok_with_status(StatusCode::OK, &serde_json::json!({"url": url}))
+}
+
+#[derive(serde::Deserialize)]
+struct GoogleCallbackQuery {
+    code: Option<String>,
+    state: Option<String>,
+}
+
+/// GoogleのOAuthリダイレクト先。ブラウザが直接遷移してくるためこちらの
+/// Bearerセッショントークンは付与されない——`state`パラメータの一致
+/// (`google_calendar_login`で発行したワンタイム値)のみでCSRFを防ぐ。
+#[handler]
+fn google_calendar_callback(
+    state: Data<&Arc<AppState>>,
+    poem::web::Query(q): poem::web::Query<GoogleCallbackQuery>,
+) -> Response {
+    let expected = state.google_oauth_state.lock().unwrap().take();
+    let (Some(code), Some(got_state)) = (q.code, q.state) else {
+        return json_ok_with_status(StatusCode::BAD_REQUEST, &serde_json::json!({"error": "missing code/state"}));
+    };
+    if expected.as_deref() != Some(got_state.as_str()) {
+        return json_ok_with_status(StatusCode::BAD_REQUEST, &serde_json::json!({"error": "state mismatch"}));
+    }
+    let Some(config) = rs_sync::google_calendar::GoogleOAuthConfig::from_env() else {
+        return json_ok_with_status(StatusCode::SERVICE_UNAVAILABLE, &serde_json::json!({"error": "not configured"}));
+    };
+    match rs_sync::google_calendar::exchange_code_for_tokens(&config, &code) {
+        Ok(tokens) => {
+            let mut store = state.store.lock().unwrap();
+            store.google_tokens = Some(tokens);
+            drop(store);
+            state.save();
+            Response::builder().status(StatusCode::FOUND).header("Location", "../").body(())
+        }
+        Err(e) => {
+            tracing::warn!("google token exchange failed: {e}");
+            json_ok_with_status(StatusCode::BAD_GATEWAY, &serde_json::json!({"error": e.to_string()}))
+        }
+    }
+}
+
+/// 指定したジョブの`schedule.specific_dates`(特定日付スケジュール)を
+/// Googleカレンダーへそれぞれ予定として作成する。同期成功後は
+/// `google_synced=true`を立て、以後このジョブのスケジュールが特定日付
+/// 方式でなくなったり削除されたりした際に、解除通知イベントを書き込む
+/// 対象として扱われるようになる。
+fn sync_schedule_to_google_calendar_blocking(
+    state: &Arc<AppState>,
+    job_name: &str,
+    schedule: &Schedule,
+) -> Result<usize, String> {
+    let config = rs_sync::google_calendar::GoogleOAuthConfig::from_env()
+        .ok_or_else(|| "not configured".to_string())?;
+    let tokens = state
+        .store
+        .lock()
+        .unwrap()
+        .google_tokens
+        .clone()
+        .ok_or_else(|| "not connected".to_string())?;
+    let refreshed = rs_sync::google_calendar::refresh_if_needed(&config, &tokens).map_err(|e| e.to_string())?;
+    if refreshed.access_token != tokens.access_token {
+        let mut store = state.store.lock().unwrap();
+        store.google_tokens = Some(refreshed.clone());
+        drop(store);
+        state.save();
+    }
+    let (Some(h), Some(m)) = (schedule.specific_dates_hour, schedule.specific_dates_minute) else {
+        return Err("no specific dates configured".to_string());
+    };
+    let mut created = 0;
+    for date in &schedule.specific_dates {
+        let summary = format!("RS-Sync: {job_name}");
+        rs_sync::google_calendar::create_event_with_id(&refreshed.access_token, date, h, m, &summary)
+            .map_err(|e| e.to_string())?;
+        created += 1;
+    }
+    Ok(created)
+}
+
+#[handler]
+async fn sync_job_to_google_calendar(state: Data<&Arc<AppState>>, PPath(id): PPath<String>) -> Json<serde_json::Value> {
+    let state = state.clone();
+    let job = { state.store.lock().unwrap().jobs.iter().find(|j| j.id == id).cloned() };
+    let Some(job) = job else {
+        return Json(serde_json::json!({"success": false, "message": "job not found"}));
+    };
+    let state2 = state.clone();
+    let job_name = job.name.clone();
+    let schedule = job.schedule.clone();
+    let result = tokio::task::spawn_blocking(move || sync_schedule_to_google_calendar_blocking(&state2, &job_name, &schedule))
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()));
+    match result {
+        Ok(count) => {
+            let mut store = state.store.lock().unwrap();
+            if let Some(j) = store.jobs.iter_mut().find(|j| j.id == id) {
+                j.google_synced = true;
+            }
+            drop(store);
+            state.save();
+            Json(serde_json::json!({"success": true, "message": format!("synced {count} event(s)")}))
+        }
+        Err(e) => Json(serde_json::json!({"success": false, "message": e})),
+    }
+}
+
+#[handler]
+async fn sync_folder_job_to_google_calendar(state: Data<&Arc<AppState>>, PPath(id): PPath<String>) -> Json<serde_json::Value> {
+    let state = state.clone();
+    let job = { state.store.lock().unwrap().folder_jobs.iter().find(|j| j.id == id).cloned() };
+    let Some(job) = job else {
+        return Json(serde_json::json!({"success": false, "message": "job not found"}));
+    };
+    let state2 = state.clone();
+    let job_name = job.name.clone();
+    let schedule = job.schedule.clone();
+    let result = tokio::task::spawn_blocking(move || sync_schedule_to_google_calendar_blocking(&state2, &job_name, &schedule))
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()));
+    match result {
+        Ok(count) => {
+            let mut store = state.store.lock().unwrap();
+            if let Some(j) = store.folder_jobs.iter_mut().find(|j| j.id == id) {
+                j.google_synced = true;
+            }
+            drop(store);
+            state.save();
+            Json(serde_json::json!({"success": true, "message": format!("synced {count} event(s)")}))
+        }
+        Err(e) => Json(serde_json::json!({"success": false, "message": e})),
+    }
+}
+
 /// GET /api/accountsのレスポンス専用のトークン非公開ビュー。
 /// **セキュリティ上重要**: `Account.token`(GitHub PAT等の実トークン)を
 /// 一覧APIへそのままシリアライズすると、ログイン済みブラウザは元より、
@@ -204,6 +369,7 @@ fn create_job(state: Data<&Arc<AppState>>, Json(req): Json<NewJobReq>) -> Json<S
         last_run_status: None,
         conflicted_repos: vec![],
         initial_realtime_poll_minutes,
+        google_synced: false,
     };
     {
         let mut store = state.store.lock().unwrap();
@@ -225,29 +391,94 @@ struct UpdateScheduleReq {
     schedule: Schedule,
 }
 
+/// 2026-08-13追記(ユーザー指示「rs-syncの設定を解除したら、設定を
+/// 解除しましたと、その日時をGoogleカレンダーに自動で英語と日本語で
+/// 書いて」): 特定日付スケジュールがGoogleカレンダーへ同期済み
+/// (`google_synced`)だったジョブの、その設定が外れた(スケジュールが
+/// 特定日付方式でなくなった、またはジョブ自体が削除された)ときに、
+/// 「解除しました」という記録用イベントを"今"の日時でカレンダーへ
+/// 書き込む。トークン未接続・資格情報未設定の場合は静かに何もしない
+/// (この通知はベストエフォートの補助機能であり、本来の同期処理を
+/// 妨げてはならないため)。
+fn google_notify_cancelled_blocking(state: &Arc<AppState>, job_name: &str) {
+    let Some(config) = rs_sync::google_calendar::GoogleOAuthConfig::from_env() else {
+        return;
+    };
+    let tokens_opt = { state.store.lock().unwrap().google_tokens.clone() };
+    let Some(tokens) = tokens_opt else {
+        return;
+    };
+    let refreshed = match rs_sync::google_calendar::refresh_if_needed(&config, &tokens) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("google token refresh failed while notifying cancellation: {e}");
+            return;
+        }
+    };
+    if refreshed.access_token != tokens.access_token {
+        let mut store = state.store.lock().unwrap();
+        store.google_tokens = Some(refreshed.clone());
+        drop(store);
+        state.save();
+    }
+    if let Err(e) = rs_sync::google_calendar::create_cancellation_event(&refreshed.access_token, job_name) {
+        tracing::warn!("failed to write google calendar cancellation event: {e}");
+    }
+}
+
+fn schedule_has_specific_dates(s: &Schedule) -> bool {
+    s.specific_dates_hour.is_some() && s.specific_dates_minute.is_some() && !s.specific_dates.is_empty()
+}
+
 #[handler]
-fn update_job_schedule(
+async fn update_job_schedule(
     state: Data<&Arc<AppState>>,
     PPath(id): PPath<String>,
     Json(req): Json<UpdateScheduleReq>,
 ) -> Json<serde_json::Value> {
-    let mut store = state.store.lock().unwrap();
-    if let Some(job) = store.jobs.iter_mut().find(|j| j.id == id) {
+    let state = state.clone();
+    let notify = {
+        let mut store = state.store.lock().unwrap();
+        let Some(job) = store.jobs.iter_mut().find(|j| j.id == id) else {
+            return Json(serde_json::json!({"ok": false}));
+        };
+        let was_synced = job.google_synced;
+        let had_specific_dates = schedule_has_specific_dates(&job.schedule);
+        let name = job.name.clone();
         job.schedule = req.schedule;
-        drop(store);
-        state.save();
-        return Json(serde_json::json!({"ok": true}));
+        let still_has_specific_dates = schedule_has_specific_dates(&job.schedule);
+        let should_notify = was_synced && had_specific_dates && !still_has_specific_dates;
+        if should_notify {
+            job.google_synced = false;
+        }
+        should_notify.then_some(name)
+    };
+    state.save();
+    if let Some(name) = notify {
+        let state2 = state.clone();
+        tokio::task::spawn_blocking(move || google_notify_cancelled_blocking(&state2, &name))
+            .await
+            .ok();
     }
-    Json(serde_json::json!({"ok": false}))
+    Json(serde_json::json!({"ok": true}))
 }
 
 #[handler]
-fn delete_job(state: Data<&Arc<AppState>>, PPath(id): PPath<String>) -> Json<serde_json::Value> {
-    {
+async fn delete_job(state: Data<&Arc<AppState>>, PPath(id): PPath<String>) -> Json<serde_json::Value> {
+    let state = state.clone();
+    let notify = {
         let mut store = state.store.lock().unwrap();
+        let removed = store.jobs.iter().find(|j| j.id == id).cloned();
         store.jobs.retain(|j| j.id != id);
-    }
+        removed.filter(|j| j.google_synced).map(|j| j.name)
+    };
     state.save();
+    if let Some(name) = notify {
+        let state2 = state.clone();
+        tokio::task::spawn_blocking(move || google_notify_cancelled_blocking(&state2, &name))
+            .await
+            .ok();
+    }
     Json(serde_json::json!({"ok": true}))
 }
 
@@ -385,6 +616,7 @@ fn create_folder_job(state: Data<&Arc<AppState>>, Json(req): Json<NewFolderJobRe
         last_run_at: None,
         last_run_status: None,
         initial_realtime_poll_minutes,
+        google_synced: false,
     };
     {
         let mut store = state.store.lock().unwrap();
@@ -395,28 +627,54 @@ fn create_folder_job(state: Data<&Arc<AppState>>, Json(req): Json<NewFolderJobRe
 }
 
 #[handler]
-fn update_folder_job_schedule(
+async fn update_folder_job_schedule(
     state: Data<&Arc<AppState>>,
     PPath(id): PPath<String>,
     Json(req): Json<UpdateScheduleReq>,
 ) -> Json<serde_json::Value> {
-    let mut store = state.store.lock().unwrap();
-    if let Some(job) = store.folder_jobs.iter_mut().find(|j| j.id == id) {
+    let state = state.clone();
+    let notify = {
+        let mut store = state.store.lock().unwrap();
+        let Some(job) = store.folder_jobs.iter_mut().find(|j| j.id == id) else {
+            return Json(serde_json::json!({"ok": false}));
+        };
+        let was_synced = job.google_synced;
+        let had_specific_dates = schedule_has_specific_dates(&job.schedule);
+        let name = job.name.clone();
         job.schedule = req.schedule;
-        drop(store);
-        state.save();
-        return Json(serde_json::json!({"ok": true}));
+        let still_has_specific_dates = schedule_has_specific_dates(&job.schedule);
+        let should_notify = was_synced && had_specific_dates && !still_has_specific_dates;
+        if should_notify {
+            job.google_synced = false;
+        }
+        should_notify.then_some(name)
+    };
+    state.save();
+    if let Some(name) = notify {
+        let state2 = state.clone();
+        tokio::task::spawn_blocking(move || google_notify_cancelled_blocking(&state2, &name))
+            .await
+            .ok();
     }
-    Json(serde_json::json!({"ok": false}))
+    Json(serde_json::json!({"ok": true}))
 }
 
 #[handler]
-fn delete_folder_job(state: Data<&Arc<AppState>>, PPath(id): PPath<String>) -> Json<serde_json::Value> {
-    {
+async fn delete_folder_job(state: Data<&Arc<AppState>>, PPath(id): PPath<String>) -> Json<serde_json::Value> {
+    let state = state.clone();
+    let notify = {
         let mut store = state.store.lock().unwrap();
+        let removed = store.folder_jobs.iter().find(|j| j.id == id).cloned();
         store.folder_jobs.retain(|j| j.id != id);
-    }
+        removed.filter(|j| j.google_synced).map(|j| j.name)
+    };
     state.save();
+    if let Some(name) = notify {
+        let state2 = state.clone();
+        tokio::task::spawn_blocking(move || google_notify_cancelled_blocking(&state2, &name))
+            .await
+            .ok();
+    }
     Json(serde_json::json!({"ok": true}))
 }
 
@@ -601,12 +859,19 @@ fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::End
         .at("/folder-jobs", get(list_folder_jobs).post(create_folder_job))
         .at("/folder-jobs/:id", poem::delete(delete_folder_job).put(update_folder_job_schedule))
         .at("/folder-jobs/:id/run", post(run_folder_job_now))
+        .at("/folder-jobs/:id/sync-google-calendar", post(sync_folder_job_to_google_calendar))
+        .at("/jobs/:id/sync-google-calendar", post(sync_job_to_google_calendar))
+        .at("/google/status", get(google_calendar_status))
+        .at("/google/login", get(google_calendar_login))
         .with(RequireAuth { auth_state: auth_state.clone() });
 
     let api = Route::new()
         .at("/auth/request-otp", post(request_otp))
         .at("/auth/verify-otp", post(verify_otp))
         .at("/auth/logout", post(logout))
+        // GoogleのOAuthリダイレクトはこちらのBearerトークンを運べないため
+        // 未認証のまま公開する(CSRF対策は`state`パラメータの一致のみ)。
+        .at("/auth/google/callback", get(google_calendar_callback))
         .nest("/", protected)
         .with(ReadOnlyGuard { read_only: auth_state.read_only });
 

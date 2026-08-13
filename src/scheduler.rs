@@ -238,6 +238,59 @@ fn is_due_schedule(sched: &crate::model::Schedule, last: Option<chrono::DateTime
             }
         }
     }
+    // 2026-08-13追記(ユーザー指示「一週間に1回から数回の場合は、曜日から
+    // 選択して、後は24時間の中からその日ごとに選択して」): 曜日ごとに
+    // 異なる時刻を許す週次スケジュール。上の`days_of_week`(全曜日で
+    // 単一時刻)とは独立に判定し、どちらか一方でも該当すれば実行する。
+    if !sched.weekly_day_times.is_empty() {
+        let weekday = now.weekday().num_days_from_sunday() as u8;
+        for slot in &sched.weekly_day_times {
+            if slot.weekday != weekday {
+                continue;
+            }
+            let same_slot = now.hour() as u8 == slot.hour && now.minute() as u8 == slot.minute;
+            let already_ran_this_minute = last
+                .map(|l| l.hour() as u8 == slot.hour && l.minute() as u8 == slot.minute && l.date_naive() == now.date_naive())
+                .unwrap_or(false);
+            if same_slot && !already_ran_this_minute {
+                return true;
+            }
+        }
+    }
+    // 2026-08-13追記(ユーザー指示「一ヶ月に一回から数回を選択したら
+    // カレンダーから...それが何日で...時間を指定してもらう」+「定時の
+    // 時間を指定したらそれを毎日というチェックボックスで指定も可能」):
+    // 月次スケジュール。`monthly_daily`がtrueなら日にちを問わず毎日
+    // 指定時刻に実行、falseなら`monthly_days`に含まれる日にちのみ。
+    if let (Some(h), Some(m)) = (sched.monthly_hour, sched.monthly_minute) {
+        let day_matches = sched.monthly_daily || sched.monthly_days.contains(&(now.day() as u8));
+        if day_matches {
+            let same_slot = now.hour() as u8 == h && now.minute() as u8 == m;
+            let already_ran_this_minute = last
+                .map(|l| l.hour() as u8 == h && l.minute() as u8 == m && l.date_naive() == now.date_naive())
+                .unwrap_or(false);
+            if same_slot && !already_ran_this_minute {
+                return true;
+            }
+        }
+    }
+    // 2026-08-13追記(ユーザー指示「設定したカレンダーから次の予定など
+    // 1年分の月日と時間を保存出来るようにして」): `monthly_days`(日番号
+    // のみ、毎月繰り返す)とは別に、特定の年月日("YYYY-MM-DD")のリストを
+    // 判定する。年をまたいでも同じ日付は一度しか一致しないため、真の
+    // 「特定の日」の一回限りの予定として機能する。
+    if let (Some(h), Some(m)) = (sched.specific_dates_hour, sched.specific_dates_minute) {
+        let today_str = now.format("%Y-%m-%d").to_string();
+        if sched.specific_dates.iter().any(|d| d == &today_str) {
+            let same_slot = now.hour() as u8 == h && now.minute() as u8 == m;
+            let already_ran_this_minute = last
+                .map(|l| l.hour() as u8 == h && l.minute() as u8 == m && l.date_naive() == now.date_naive())
+                .unwrap_or(false);
+            if same_slot && !already_ran_this_minute {
+                return true;
+            }
+        }
+    }
     false
 }
 
@@ -416,6 +469,101 @@ fn execute_folder_job_inner(state: Arc<AppState>, job_id: &str) -> Option<crate:
 }
 
 #[cfg(test)]
+mod weekly_monthly_schedule_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    /// 2026-08-13追記(ユーザー指示「一週間に1回から数回の場合は、曜日
+    /// から選択して、後は24時間の中からその日ごとに選択して」)の回帰
+    /// 確認: 曜日ごとに異なる時刻でも、それぞれ正しく判定されること。
+    #[test]
+    fn weekly_day_times_fires_at_each_days_own_time_only() {
+        let sched = crate::model::Schedule {
+            weekly_day_times: vec![
+                crate::model::WeeklyDayTime { weekday: 1, hour: 9, minute: 0 },  // Monday 09:00
+                crate::model::WeeklyDayTime { weekday: 5, hour: 18, minute: 30 }, // Friday 18:30
+            ],
+            ..Default::default()
+        };
+        // 2026-08-17は月曜日。
+        let monday_at_9 = Utc.with_ymd_and_hms(2026, 8, 17, 9, 0, 0).unwrap();
+        assert!(is_due_schedule(&sched, None, &monday_at_9));
+        // 同じ月曜でも別の時刻は該当しない。
+        let monday_at_10 = Utc.with_ymd_and_hms(2026, 8, 17, 10, 0, 0).unwrap();
+        assert!(!is_due_schedule(&sched, None, &monday_at_10));
+        // 金曜18:30は該当する。
+        let friday_at_1830 = Utc.with_ymd_and_hms(2026, 8, 21, 18, 30, 0).unwrap();
+        assert!(is_due_schedule(&sched, None, &friday_at_1830));
+        // 直前に同じ分で既に実行済みなら二重発火しない。
+        let already_ran = Some(monday_at_9);
+        assert!(!is_due_schedule(&sched, already_ran, &monday_at_9));
+    }
+
+    /// 2026-08-13追記(ユーザー指示「一ヶ月に一回から数回を選択したら
+    /// カレンダーから...それが何日で...時間を指定してもらう」)の回帰
+    /// 確認: 指定した日にちのみで発火し、それ以外の日は発火しない。
+    #[test]
+    fn monthly_days_fires_only_on_specified_days() {
+        let sched = crate::model::Schedule {
+            monthly_days: vec![1, 15],
+            monthly_hour: Some(3),
+            monthly_minute: Some(0),
+            ..Default::default()
+        };
+        let on_the_1st = Utc.with_ymd_and_hms(2026, 9, 1, 3, 0, 0).unwrap();
+        assert!(is_due_schedule(&sched, None, &on_the_1st));
+        let on_the_15th = Utc.with_ymd_and_hms(2026, 9, 15, 3, 0, 0).unwrap();
+        assert!(is_due_schedule(&sched, None, &on_the_15th));
+        let on_the_2nd = Utc.with_ymd_and_hms(2026, 9, 2, 3, 0, 0).unwrap();
+        assert!(!is_due_schedule(&sched, None, &on_the_2nd));
+    }
+
+    /// 2026-08-13追記(ユーザー指示「定時の時間を指定したらそれを毎日と
+    /// 言うチェックボックスで指定も可能」)の回帰確認: `monthly_daily`が
+    /// trueなら`monthly_days`が空でも毎日発火する。
+    #[test]
+    fn monthly_daily_flag_ignores_monthly_days_and_fires_every_day() {
+        let sched = crate::model::Schedule {
+            monthly_days: vec![],
+            monthly_hour: Some(7),
+            monthly_minute: Some(45),
+            monthly_daily: true,
+            ..Default::default()
+        };
+        let any_day = Utc.with_ymd_and_hms(2026, 8, 13, 7, 45, 0).unwrap();
+        assert!(is_due_schedule(&sched, None, &any_day));
+        let another_day = Utc.with_ymd_and_hms(2026, 8, 20, 7, 45, 0).unwrap();
+        assert!(is_due_schedule(&sched, None, &another_day));
+    }
+
+    /// 2026-08-13追記(ユーザー指示「設定したカレンダーから次の予定など
+    /// 1年分の月日と時間を保存出来るようにして」)の回帰確認: 指定した
+    /// 特定の年月日のみで発火し、同じ日番号でも別の月/年は発火しない
+    /// (`monthly_days`の「毎月繰り返す」挙動とは異なる、真の一回限りの
+    /// 予定であることを確認)。
+    #[test]
+    fn specific_dates_fire_only_on_the_exact_calendar_date() {
+        let sched = crate::model::Schedule {
+            specific_dates: vec!["2026-09-15".to_string(), "2027-01-03".to_string()],
+            specific_dates_hour: Some(14),
+            specific_dates_minute: Some(0),
+            ..Default::default()
+        };
+        let matching = Utc.with_ymd_and_hms(2026, 9, 15, 14, 0, 0).unwrap();
+        assert!(is_due_schedule(&sched, None, &matching));
+        let far_future_match = Utc.with_ymd_and_hms(2027, 1, 3, 14, 0, 0).unwrap();
+        assert!(is_due_schedule(&sched, None, &far_future_match));
+        // 同じ日番号(15日)でも指定していない月なら発火しない
+        // (monthly_daysの「毎月繰り返す」挙動との違いを確認)。
+        let same_day_number_different_month = Utc.with_ymd_and_hms(2026, 10, 15, 14, 0, 0).unwrap();
+        assert!(!is_due_schedule(&sched, None, &same_day_number_different_month));
+        // 同じ日付でも時刻が違えば発火しない。
+        let wrong_time = Utc.with_ymd_and_hms(2026, 9, 15, 15, 0, 0).unwrap();
+        assert!(!is_due_schedule(&sched, None, &wrong_time));
+    }
+}
+
+#[cfg(test)]
 mod notification_tests {
     use super::*;
 
@@ -446,11 +594,8 @@ mod notification_tests {
     #[test]
     fn auto_widen_schedule_bumps_realtime_poll_minutes_when_run_is_too_slow() {
         let mut sched = crate::model::Schedule {
-            every_hours: None,
-            days_of_week: vec![],
-            hour: None,
-            minute: None,
             realtime_poll_minutes: Some(5),
+            ..Default::default()
         };
         // 実測7分 > 設定5分 なので引き上げが発生するはず。
         let note = auto_widen_schedule_if_too_slow(&mut sched, 7);
@@ -459,11 +604,8 @@ mod notification_tests {
 
         // 実測が間隔以下なら変更しない。
         let mut sched2 = crate::model::Schedule {
-            every_hours: None,
-            days_of_week: vec![],
-            hour: None,
-            minute: None,
             realtime_poll_minutes: Some(60),
+            ..Default::default()
         };
         let note2 = auto_widen_schedule_if_too_slow(&mut sched2, 5);
         assert!(note2.is_none());
@@ -474,10 +616,7 @@ mod notification_tests {
     fn auto_widen_schedule_bumps_every_hours_when_run_is_too_slow() {
         let mut sched = crate::model::Schedule {
             every_hours: Some(1),
-            days_of_week: vec![],
-            hour: None,
-            minute: None,
-            realtime_poll_minutes: None,
+            ..Default::default()
         };
         // 実測90分 > 設定1時間(60分) なので引き上げが発生するはず。
         let note = auto_widen_schedule_if_too_slow(&mut sched, 90);
