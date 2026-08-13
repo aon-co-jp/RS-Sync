@@ -116,11 +116,11 @@ a{color:#fff}
   一方向(マスター→コピー先のみ)・全リポジトリ・下で選んだ間隔での
   自動実行として作成されます。
 </p>
-<form id="quickForm">
+<form id="quickForm" autocomplete="off">
   <label for="quick-master-url" data-i18n="quickMasterLabel">マスター(コピー元)のGitHub URLまたは組織/ユーザー名</label>
-  <input id="quick-master-url" placeholder="https://github.com/aon-co-jp または aon-co-jp" required>
+  <input id="quick-master-url" placeholder="https://github.com/aon-co-jp または aon-co-jp" autocomplete="off" required>
   <label for="quick-master-token" data-i18n="quickMasterTokenLabel">マスターの読み取り用トークン(公開リポジトリのみなら空欄可)</label>
-  <input id="quick-master-token" type="password" placeholder="ghp_...">
+  <input id="quick-master-token" type="password" placeholder="ghp_..." autocomplete="new-password" data-lpignore="true">
 
   <div id="quick-dest-rows"></div>
   <div class="buttons">
@@ -533,6 +533,11 @@ let cachedJobs = [];
 function findGithubAccountByOwner(owner){
   return cachedAccounts.find(a => a.provider === "GitHub" && a.owner === owner);
 }
+let quickScheduleUserTouched = false;
+document.addEventListener("DOMContentLoaded", () => {
+  const el = document.getElementById("quick-schedule");
+  if (el) el.addEventListener("change", () => { quickScheduleUserTouched = true; });
+});
 function prefillQuickSetupFromExistingAccounts(){
   const masterUrlInput = document.getElementById("quick-master-url");
   const masterTokenInput = document.getElementById("quick-master-token");
@@ -555,6 +560,24 @@ function prefillQuickSetupFromExistingAccounts(){
       destTokenInput.placeholder = dest.token_set
         ? (lang === "ja" ? "●●●●●●●●(設定済み・変更する場合のみ入力)" : "●●●●●●●● (already set — type to change)")
         : "ghp_...";
+    }
+  }
+  // 実バグ修正(2026-08-13、ユーザー報告「1分を指定したのに30分になって
+  // いる」): 「マスターの変化をチェックする間隔」の`<select>`はHTML側で
+  // 30分が`selected`固定になっており、既存ジョブの実際の間隔設定が
+  // 何であってもページ読み込みのたびに30分へ戻って見えていた
+  // (ユーザーが以前1分を選んで作成したジョブがあっても反映されない)。
+  // 既存のmaster-*アカウントを送信元とするジョブが見つかれば、その
+  // 実際の現在の間隔をプルダウンへ反映する。
+  const scheduleSelect = document.getElementById("quick-schedule");
+  const master = cachedAccounts.find(a => a.provider === "GitHub" && a.name.startsWith("master-"));
+  if (scheduleSelect && !quickScheduleUserTouched && master && cachedJobs.length) {
+    const masterJob = cachedJobs.find(j => j.source_account_id === master.id);
+    if (masterJob) {
+      const mins = masterJob.schedule && masterJob.schedule.realtime_poll_minutes;
+      const optionExists = mins != null && Array.from(scheduleSelect.options).some(o => o.value === String(mins));
+      if (optionExists) scheduleSelect.value = String(mins);
+      else if (mins == null) scheduleSelect.value = "";
     }
   }
 }
@@ -737,6 +760,7 @@ async function saveSchedule(kind, id){
 async function renderJobs(accs){
   const jobs = await api("api/jobs");
   cachedJobs = jobs;
+  prefillQuickSetupFromExistingAccounts();
   const logs = await api("api/logs");
   const accName = id => (accs.find(a=>a.id===id)||{}).name || id;
   // 各ジョブについて、直近の実行ログ(エラーメッセージ)を紐付ける
@@ -1067,9 +1091,9 @@ function makeDestRow(){
   row.style.paddingTop = ".5rem";
   row.innerHTML = `
     <label data-i18n="quickDestLabel">コピー先のGitHub URLまたは組織/ユーザー名</label>
-    <input class="quick-dest-url" placeholder="https://github.com/OpenRuno または OpenRuno" required>
+    <input class="quick-dest-url" placeholder="https://github.com/OpenRuno または OpenRuno" autocomplete="off" required>
     <label data-i18n="quickDestTokenLabel">コピー先への書き込み用トークン(repoスコープ、push権限が必要)</label>
-    <input class="quick-dest-token" type="password" placeholder="ghp_...">
+    <input class="quick-dest-token" type="password" placeholder="ghp_..." autocomplete="new-password" data-lpignore="true">
     <div class="buttons"><button type="button" class="quick-remove-dest" data-i18n="quickRemoveDest">このコピー先を削除</button></div>
   `;
   row.querySelector(".quick-remove-dest").onclick = () => row.remove();
@@ -1164,6 +1188,7 @@ document.getElementById("quickForm").onsubmit = async (e) => {
     document.getElementById("quick-master-token").value = "";
     document.getElementById("quick-dest-rows").innerHTML = "";
     document.getElementById("quick-dest-rows").appendChild(makeDestRow());
+    quickScheduleUserTouched = false;
     renderAll();
   } catch (e) {
     resultEl.textContent = (lang === "ja" ? "エラー: " : "Error: ") + (e.message || String(e));
