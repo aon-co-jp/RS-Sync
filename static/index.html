@@ -468,7 +468,8 @@ const dict = {
    googleCalendarDesc:"設定したカレンダーから作成した次回予定など、最大1年分の月日と時刻を保存できます。このデータはGoogleカレンダーに保存でき、非公開設定も可能です。Googleアカウントでログインすると、Googleカレンダーへ保存して連動できます。",
    googleCalendarLogin:"Googleでログイン", googleCalendarConnected:"接続済み", googleCalendarNotConnected:"未接続",
    googleCalendarSyncBtn:"このジョブの予定をGoogleカレンダーへ同期", googleCalendarSyncResult:"Googleカレンダーへ同期しました。",
-   googleCalendarNotConfigured:"このサーバーにはGoogle連携用の資格情報(RS_SYNC_GOOGLE_CLIENT_ID等)が設定されていません。管理者に設定を依頼してください。"},
+   googleCalendarNotConfigured:"このサーバーにはGoogle連携用の資格情報(RS_SYNC_GOOGLE_CLIENT_ID等)が設定されていません。管理者に設定を依頼してください。",
+   googleCalendarSetupSteps:"実際に使うには、あなた自身がGoogle Cloud Consoleで以下を行っていただく必要があります: (1) Google Cloud Consoleで新規プロジェクト(または既存プロジェクト)を用意。(2) OAuth同意画面を設定、OAuth 2.0クライアントID(種類: ウェブアプリケーション)を作成。(3) 承認済みリダイレクトURIに https://easy-web.tokyo/rs-sync/api/auth/google/callback を追加(このURLの部分はご自分のURLに合わせてご使用下さい)。(4) 発行された「クライアントID」「クライアントシークレット」を管理者へお知らせいただければ、VPSの環境変数に設定して再起動します。"},
  en: {title:"RS-Sync — Git Repository Sync Tool", intro:"One-way backup or two-way sync of repositories across GitHub / open-gitea / Gitea / Gitbucket.",
    loginH:"Login", loginNote:"For security reasons, only the registered admin email can log in.",
    loginEmailLabel:"Admin email address", sendCode:"Send code", loginCodeLabel:"Received code (6 digits)", login:"Log in",
@@ -547,7 +548,8 @@ const dict = {
    googleCalendarDesc:"Dates and times you set on the calendar (up to a year of upcoming events) can be saved. This data can be stored in Google Calendar, with a private visibility option. Sign in with your Google account to save and sync them to Google Calendar.",
    googleCalendarLogin:"Sign in with Google", googleCalendarConnected:"Connected", googleCalendarNotConnected:"Not connected",
    googleCalendarSyncBtn:"Sync this job's schedule to Google Calendar", googleCalendarSyncResult:"Synced to Google Calendar.",
-   googleCalendarNotConfigured:"This server has no Google integration credentials configured (RS_SYNC_GOOGLE_CLIENT_ID etc.). Ask your administrator to set them up."}
+   googleCalendarNotConfigured:"This server has no Google integration credentials configured (RS_SYNC_GOOGLE_CLIENT_ID etc.). Ask your administrator to set them up.",
+   googleCalendarSetupSteps:"To actually use this, you (the administrator) need to do the following in Google Cloud Console: (1) Set up a new (or existing) project in Google Cloud Console. (2) Configure the OAuth consent screen and create an OAuth 2.0 client ID (type: Web application). (3) Add https://easy-web.tokyo/rs-sync/api/auth/google/callback to the authorized redirect URIs (replace this URL with your own deployment's URL). (4) Send the issued \"Client ID\" and \"Client Secret\" to your administrator, who will set them as environment variables on the VPS and restart the service."}
 };
 let lang = "ja";
 function applyI18n(){
@@ -1517,7 +1519,11 @@ async function renderGoogleCalendarStatus(){
   try {
     const status = await api("api/google/status");
     if (!status.configured) {
-      el.textContent = dict[lang].googleCalendarNotConfigured;
+      // ユーザー指示(2026-08-13「Googleカレンダーと連携するには…この
+      // 日本語と英語の説明を一緒に表示して下さい」)への対応: 未設定時に
+      // Google Cloud Console側で必要な設定手順を日英併記でその場に表示
+      // する(管理者への問い合わせ導線を明確にするため)。
+      el.innerHTML = `<div>${dict[lang].googleCalendarNotConfigured}</div><div class="hint">${dict[lang].googleCalendarSetupSteps}</div>`;
       loginBtn.classList.add("hidden");
     } else {
       el.innerHTML = status.connected
