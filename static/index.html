@@ -738,7 +738,7 @@ function scheduleCell(job, logs, kind){
   const existingInput = document.getElementById(inputId);
   const isOpen = openScheduleEdits.has(editKey);
   const currentMinutes = (existingInput && isOpen) ? existingInput.value : ((job.schedule && job.schedule.realtime_poll_minutes) || "");
-  return `<div>${dict[lang].currentInterval}: ${summary}${initialVsCurrentHint}${durHint}${warn}${autoAdjustedHint}
+  return `<div><div class="hint">${dict[lang].currentInterval}: ${summary}</div>${initialVsCurrentHint}${durHint}${warn}${autoAdjustedHint}
     <div class="buttons">
       <button type="button" onclick="toggleScheduleEdit('${kind}','${job.id}')">${dict[lang].editSchedule}</button>
     </div>
@@ -797,7 +797,7 @@ async function renderJobs(accs){
         ? `<div class="hint" style="color:#ff9a9a">${escapeHtml(lastLog.message)}</div>` : "";
       const sameAccountWarning = (j.source_account_id === j.dest_account_id)
         ? `<div class="hint" style="color:#ffcf6b">${dict[lang].sameAccountWarning}</div>` : "";
-      return `<tr><td>${j.name}${sameAccountWarning}</td><td>${accName(j.source_account_id)}</td><td>${accName(j.dest_account_id)}</td><td>${j.direction}</td><td>${statusPill} ${conflictBadges}${errorLine}</td><td class="row-current-time">${formatDateTime(new Date())}</td><td>${nextSyncCell(j)}</td><td>${scheduleCell(j, logs, "job")}</td>
+      return `<tr><td>${j.name}${sameAccountWarning}</td><td>${accName(j.source_account_id)}</td><td>${accName(j.dest_account_id)}</td><td>${j.direction}</td><td>${statusPill} ${conflictBadges}${errorLine}</td><td class="row-current-time hint">${formatDateTime(new Date())}</td><td class="hint">${nextSyncCell(j)}</td><td>${scheduleCell(j, logs, "job")}</td>
       <td><button onclick="runJob('${j.id}')">${dict[lang].run}</button><button onclick="delJob('${j.id}')">${dict[lang].del}</button></td></tr>`;
     }).join("") + "</table>") : "<p>-</p>";
 }
@@ -994,7 +994,7 @@ async function renderFolderJobs(eps){
       const lastLog = lastLogFor(j.id);
       const errorLine = (j.last_run_status && j.last_run_status !== "ok" && lastLog)
         ? `<div class="hint" style="color:#ff9a9a">${escapeHtml(lastLog.message)}</div>` : "";
-      return `<tr><td>${j.name}</td><td>${epName(j.source_endpoint_id)}</td><td>${epName(j.dest_endpoint_id)}</td><td>${statusPill}${errorLine}</td><td class="row-current-time">${formatDateTime(new Date())}</td><td>${nextSyncCell(j)}</td><td>${scheduleCell(j, logs, "folder")}</td>
+      return `<tr><td>${j.name}</td><td>${epName(j.source_endpoint_id)}</td><td>${epName(j.dest_endpoint_id)}</td><td>${statusPill}${errorLine}</td><td class="row-current-time hint">${formatDateTime(new Date())}</td><td class="hint">${nextSyncCell(j)}</td><td>${scheduleCell(j, logs, "folder")}</td>
       <td><button onclick="runFolderJob('${j.id}')">${dict[lang].run}</button><button onclick="delFolderJob('${j.id}')">${dict[lang].del}</button></td></tr>`;
     }).join("") + "</table>") : "<p>-</p>";
 }
