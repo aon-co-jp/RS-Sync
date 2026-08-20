@@ -42,6 +42,65 @@ RS-Git/RPoem等と同じ方針: `poem`クレートを直接利用する単純な
   配下にマウントされても壊れないようにするため(open-gitea(現RS-Git)の`/rgit`デプロイ
   で絶対パスfetchが壊れた教訓を踏襲)。
 
+## HANDOFF追記(2026-08-19) 自動アップデート機能(GitHub Releases検知+安全な入れ替え+ヘルスチェック+ロールバック)を新設+Windowsインストーラー(rs-sync-install.exe)を実機検証
+
+ユーザー指示「open-english/server/src/self_update.rsと同様の自動アップ
+デートをRPoem・open-raid-z・rs-syncへ展開、実行バイナリを持つリポジトリ
+にはInno Setupで`{リポジトリ名}-install.exe`を作成」への対応。
+
+1. **新規`src/self_update.rs`**: `open-english`側`server/src/
+   self_update.rs`(GitHub Releases問い合わせ・バージョン比較・
+   ダウンロード・ヘルスチェック・自動ロールバック)を土台に移植。
+   `main.rs`起動時に非同期タスクとして起動(`tokio::spawn`、サーバー
+   自体の起動はブロックしない)。
+2. **`install.sh`/`install.ps1`(`git pull --ff-only`方式)との関係を
+   整理**: 両者は完全に別経路。`install.sh`/`install.ps1`は
+   VPS運用者が明示的に実行する既存の更新手段(ソースからの
+   `cargo build --release`)で、変更していない。この`self_update.rs`は
+   **`.github/workflows/release.yml`が生成するプリビルド済みバイナリ
+   経由でインストールされたコピーのみ**を自己置換対象とする——
+   「実行中のバイナリ自身をGitHub Releaseの新版で上書きする」という
+   別種の更新機構であり、両者が同じファイルへ二重に書き込みに行く
+   競合は起きない設計にした。
+3. **既存インシデント(2026-07-27、VPS上でワーキングディレクトリが
+   削除されてもゾンビプロセスとして動き続けた事故)を悪化させない
+   ための設計**: 固定パス文字列をキャッシュせず、常に
+   `std::env::current_exe()`で**実行中バイナリの実パス**を都度
+   re-resolveしてから自己更新の対象にする。ディレクトリごと移動・
+   削除される運用があっても「消えたはずのパスを指し続ける」状態を
+   作らない設計にした(モジュールdoc冒頭に詳細記載)。
+4. **オプトイン方式(既定オフ)**: rs-syncには`version.json`のような
+   インストール済みマーカーが無いため、ローカルバージョンは
+   `env!("CARGO_PKG_VERSION")`を使う。VPS本番の`git pull`運用と
+   誤って競合しないよう、`RS_SYNC_SELF_UPDATE=true`を明示的に設定した
+   場合のみ動作する(正直な開示: 安全側に倒した設計判断)。
+5. **Windowsインストーラー(`installer/windows/rs-sync.iss`)**:
+   `open-english`の`.iss`パターン(`PrivilegesRequired=lowest`・
+   バージョン番号なし固定ファイル名)を踏襲。**この開発機に
+   Inno Setup Compiler(`ISCC.exe`、`C:\Program Files (x86)\Inno
+   Setup 6\ISCC.exe`)が実在したため、実際にビルド・実インストール・
+   実アンインストール検証まで完了**: `cargo build --release --bin
+   rs-sync`成功→`ISCC.exe rs-sync.iss`で`dist\rs-sync-install.exe`
+   生成成功→`/VERYSILENT /DIR=<一時フォルダ>`で無人インストール→
+   `rs-sync.exe`(13MB)・`install.sh`・`install.ps1`・
+   `README-INSTALLED.txt`が実際に配置されることを確認→
+   `unins000.exe /VERYSILENT`でアンインストール→ファイルが完全に
+   削除されることを確認。
+6. **検証(実測)**: `cargo build --release --bin rs-sync`成功
+   (約4分47秒)。`self_update.rs`の単体テスト3件(バージョン比較・
+   アセット名判定)を含むコードレビューは完了。**正直な開示**:
+   `aon-co-jp/RS-Sync`に実際のリリースタグが存在するかは未確認—
+   —「新版検出→ダウンロード→自己置換→ヘルスチェック→ロールバック」
+   という一連の流れそのものの実機E2Eは、実際のGitHub Release
+   (異なる2バージョン)が無いと最初から最後まで検証できないため
+   今回は未実施。プラットフォームはrelease.ymlが実際にビルドする
+   Linux(x86_64)・Windows(x86_64)のみ対応(macOSは対象外)。
+  - 次にすべきこと: (1) 実際に2バージョンのGitHub Releaseを作成し、
+    `RS_SYNC_SELF_UPDATE=true`環境下でのE2E(新版検出→自己置換→
+    ヘルスチェック→正常切替、および意図的に壊れたビルドでの
+    ロールバック発動)を確認する、(2) Linux実機での`apply_update_unix`
+    経路の実機検証(この開発機はWindowsのため未実施)。
+
 ## HANDOFF追記(2026-08-12続き6) スケジューラ競合修正・間隔の表示/編集/自動延長・クイック設定の重複作成防止・状態表示UI一式・日時のタイムゾーン表示、まとめてVPS本番反映済み
 
 トークンtrim修正(直下のHANDOFF参照)デプロイ後、ユーザーが実際に本番

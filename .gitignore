@@ -1,3 +1,6 @@
 /target
 /data
 Cargo.lock.bak
+# ビルド生成物(Inno Setup出力)。ソース(rs-sync.iss)のみコミットし、
+# ビルド済みバイナリはリポジトリに含めない(open-englishの慣例に揃える)。
+installer/windows/dist/

@@ -1140,6 +1140,14 @@ async fn main() -> Result<(), std::io::Error> {
         scheduler::run_scheduler_loop(scheduler_state).await;
     });
 
+    // 2026-08-19新設(自動アップデート機能): サーバー自体の起動を
+    // ブロックしない非同期タスクとして起動する。既定は無効
+    // (`RS_SYNC_SELF_UPDATE=true`が必要、詳細は`self_update.rs`
+    // モジュールdoc「正直な開示」参照)。
+    tokio::spawn(async move {
+        rs_sync::self_update::check_and_apply_update().await;
+    });
+
     let port: u16 = std::env::var("RS_SYNC_PORT")
         .ok()
         .and_then(|p| p.parse().ok())

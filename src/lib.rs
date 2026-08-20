@@ -6,5 +6,6 @@ pub mod model;
 pub mod provider;
 pub mod rustjson;
 pub mod scheduler;
+pub mod self_update;
 pub mod sync_engine;
 pub mod totp;

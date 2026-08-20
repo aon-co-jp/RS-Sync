@@ -111,6 +111,25 @@ discovery/creation depends on the adapter.
   cross-linker toolchain installed); Linux binaries are built directly on
   the target Linux host instead (verified on the VPS, see HANDOFF below).
 
+## Self-update (2026-08-19, opt-in)
+
+`src/self_update.rs` polls the GitHub Releases API for a newer tag,
+downloads the matching prebuilt asset (from the `release.yml` flow above),
+and swaps the running binary with a health-check + automatic rollback
+(`GET /healthz`). This is a **separate path from `install.sh`/`install.ps1`'s
+`git pull --ff-only` + `cargo build --release` flow** — it only replaces a
+copy that was installed from a prebuilt release asset, never a source
+checkout, so the two update mechanisms cannot race on the same file.
+Disabled by default; set `RS_SYNC_SELF_UPDATE=true` to opt in (VPS
+production keeps relying on `git pull`, not this). A Windows installer
+(`installer/windows/rs-sync.iss`, built with Inno Setup into
+`installer/windows/dist/rs-sync-install.exe`, gitignored) has been built and
+manually install/uninstall-tested on this dev machine; the Linux
+self-update path is code-reviewed only (not exercised on real hardware yet),
+and no GitHub Release tag has existed yet to exercise the full
+detect→download→swap→rollback flow end-to-end. See CLAUDE.md HANDOFF
+(2026-08-19) for details.
+
 ## Deployment
 
 - **Production/admin**: <https://easy-web.tokyo/rs-sync/>
