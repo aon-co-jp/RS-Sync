@@ -44,7 +44,7 @@ OutputDir=dist
 ; 自動アップデート機能(`self_update.rs`のWindows経路)が展開する
 ; zip内のファイル名は`rs-sync.exe`のみのため、この`.iss`自体は
 ; 自動アップデートの対象アセットではない(手動配布用インストーラー)。
-OutputBaseFilename=rs-sync-install
+OutputBaseFilename=rs-sync-installer
 ArchitecturesInstallIn64BitMode=x64compatible
 DisableProgramGroupPage=yes
 
@@ -62,9 +62,26 @@ Source: "README-INSTALLED.txt"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
+; PC/タブレット/スマホの電源投入・OS起動時にアプリを自動起動しバック
+; アップ同期を自動開始させる(2026-08-26新設、ユーザー指示「ローカル
+; ドライブはPCやタブレットやスマホなどの電源が入りOSが起動してアプリが
+; 自動起動してバックアップ同期を自動でSTARTさせる仕様にして」への
+; 対応)。管理者権限を要するWindowsサービス登録ではなく、現在の
+; ユーザーの「スタートアップ」フォルダへのショートカットを使う
+; (`{userstartup}`、Inno Setup標準機能・管理者権限不要・
+; `PrivilegesRequired=lowest`のまま維持できる)——Windowsへログイン
+; するたびに自動実行される。正直な開示: rs-sync.exeはコンソール
+; ウィンドウを表示する通常のRustバイナリのため、自動起動時にも
+; コンソールウィンドウが表示される(完全にバックグラウンド・非表示で
+; 動作させる改善は次回以降の課題)。既にジョブがスケジュール済みで
+; あれば、起動後はrs-sync自身の内蔵スケジューラ(1分ごとのチェック
+; ループ、README参照)が期限の来たジョブを自動実行する——この
+; ショートカット自体は「アプリを起動しておく」ことのみを担当する。
+Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: autostart
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "autostart"; Description: "Start automatically when Windows starts, so scheduled backups run without manual launch (recommended) / Windows起動時に自動的に開始し、手動で起動しなくても予約したバックアップが実行されるようにする(推奨)"; Flags: checkedonce
 
 [Run]
 ; RS_SYNC_SELF_UPDATE=trueで自動更新を明示的に有効化する
