@@ -713,6 +713,90 @@ async fn run_folder_job_now(state: Data<&Arc<AppState>>, PPath(id): PPath<String
     }
 }
 
+/// 2026-08-26追記(installer_sync機能): 現在の設定・直近の実行結果・
+/// このホストで実際に動作可能かどうか(環境変数`RS_SYNC_INSTALLER_SYNC_
+/// ENABLED`・`RS_SYNC_INSTALLER_ROOT`が揃っているか)を返す。設定APIとは
+/// 別にしているのは、環境変数は`Store`(JSON)には保存されないため
+/// (VPS/Windowsそれぞれのホスト側で設定するもの)、設定画面が
+/// 「Storeの設定はONだが、このホストの環境変数が未設定なので実際には
+/// 動いていません」という食い違いを正直に表示できるようにするため。
+#[handler]
+fn installer_sync_status(state: Data<&Arc<AppState>>) -> Json<serde_json::Value> {
+    let store = state.store.lock().unwrap();
+    let s = &store.installer_sync;
+    Json(serde_json::json!({
+        "settings": {
+            "enabled": s.enabled,
+            "interval_minutes": s.interval_minutes,
+            "last_run_at": s.last_run_at,
+        },
+        "last_outcomes": s.last_outcomes,
+        "host_env_ready": rs_sync::installer_sync::env_enabled() && rs_sync::installer_sync::configured_root().is_some(),
+        "host_master_switch_env": rs_sync::installer_sync::env_enabled(),
+        "host_root_configured": rs_sync::installer_sync::configured_root().map(|p| p.display().to_string()),
+        "repo_count": rs_sync::installer_sync::installer_sync_repos().len(),
+    }))
+}
+
+#[derive(serde::Deserialize)]
+struct UpdateInstallerSyncReq {
+    enabled: bool,
+    #[serde(default)]
+    interval_minutes: Option<u32>,
+}
+
+#[handler]
+fn update_installer_sync_config(state: Data<&Arc<AppState>>, Json(req): Json<UpdateInstallerSyncReq>) -> Json<serde_json::Value> {
+    {
+        let mut store = state.store.lock().unwrap();
+        store.installer_sync.enabled = req.enabled;
+        if let Some(mins) = req.interval_minutes {
+            store.installer_sync.interval_minutes = mins.max(1);
+        }
+    }
+    state.save();
+    Json(serde_json::json!({"ok": true}))
+}
+
+/// 手動での即時実行(スケジューラの15分待ちを待たずに動作確認したい
+/// 場合用)。ブロッキングI/O(cargo build・ISCC・git)のため他ジョブと
+/// 同じく`spawn_blocking`経由。環境変数が未設定なら「このホストでは
+/// 利用不可」という正直なメッセージを返すのみで、Store側の設定を
+/// 勝手に有効化したりはしない。
+#[handler]
+async fn run_installer_sync_now(state: Data<&Arc<AppState>>) -> Json<serde_json::Value> {
+    if !rs_sync::installer_sync::env_enabled() {
+        return Json(serde_json::json!({
+            "ok": false,
+            "message": "RS_SYNC_INSTALLER_SYNC_ENABLED=1 がこのホストの環境変数に設定されていません。 / RS_SYNC_INSTALLER_SYNC_ENABLED=1 is not set on this host."
+        }));
+    }
+    let Some(root) = rs_sync::installer_sync::configured_root() else {
+        return Json(serde_json::json!({
+            "ok": false,
+            "message": "RS_SYNC_INSTALLER_ROOT がこのホストの環境変数に設定されていません。 / RS_SYNC_INSTALLER_ROOT is not set on this host."
+        }));
+    };
+    let state = state.clone();
+    let prev_heads = {
+        let store = state.store.lock().unwrap();
+        store.installer_sync.last_synced_heads.clone()
+    };
+    let outcomes = tokio::task::spawn_blocking(move || {
+        let (outcomes, new_heads) = rs_sync::installer_sync::run_installer_sync_pass(&root, &prev_heads);
+        let mut store = state.store.lock().unwrap();
+        store.installer_sync.last_run_at = Some(chrono::Utc::now());
+        store.installer_sync.last_outcomes = outcomes.clone();
+        store.installer_sync.last_synced_heads = new_heads;
+        drop(store);
+        state.save();
+        outcomes
+    })
+    .await
+    .unwrap_or_default();
+    Json(serde_json::json!({"ok": true, "outcomes": outcomes}))
+}
+
 #[handler]
 fn index() -> Response {
     // 実バグ修正(2026-08-13、ユーザー報告「F5キーを押したら正常になった」):
@@ -1073,6 +1157,9 @@ fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::End
         .at("/auth/totp/enable", post(totp_enable))
         .at("/auth/totp/disable", post(totp_disable))
         .at("/auth/totp/status", get(totp_status))
+        .at("/installer-sync/status", get(installer_sync_status))
+        .at("/installer-sync/config", poem::put(update_installer_sync_config))
+        .at("/installer-sync/run", post(run_installer_sync_now))
         .with(RequireAuth { auth_state: auth_state.clone() });
 
     let api = Route::new()

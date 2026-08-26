@@ -91,7 +91,51 @@ pub async fn run_scheduler_loop(state: Arc<AppState>) {
         // メールで知らせる。メール送信自体はブロッキングI/Oのため
         // `spawn_blocking`で行う。
         check_expiring_tokens(state.clone(), &now).await;
+
+        // 2026-08-26追記(ユーザー指示「インストーラーを分かりやすい
+        // フォルダーに同期システムで自動で配置し直す...15分に1回でも
+        // 良いのでその様に機能するようにして」): installer_syncの
+        // マスタースイッチ(環境変数)+Store側のenabledフラグの両方が
+        // trueの場合のみ、設定した間隔(既定15分)ごとに全リポジトリを
+        // 再ビルド・差分push する。ブロッキングI/O(cargo build・ISCC・
+        // git)のため他ジョブと同じく`spawn_blocking`経由。
+        maybe_run_installer_sync(state.clone(), &now).await;
     }
+}
+
+async fn maybe_run_installer_sync(state: Arc<AppState>, now: &chrono::DateTime<Utc>) {
+    if !crate::installer_sync::env_enabled() {
+        return;
+    }
+    let Some(root) = crate::installer_sync::configured_root() else {
+        return;
+    };
+    let (enabled, due) = {
+        let store = state.store.lock().unwrap();
+        let s = &store.installer_sync;
+        let due = match s.last_run_at {
+            None => true,
+            Some(last) => (*now - last).num_minutes() >= s.interval_minutes as i64,
+        };
+        (s.enabled, due)
+    };
+    if !enabled || !due {
+        return;
+    }
+    let now = *now;
+    let prev_heads = {
+        let store = state.store.lock().unwrap();
+        store.installer_sync.last_synced_heads.clone()
+    };
+    tokio::task::spawn_blocking(move || {
+        let (outcomes, new_heads) = crate::installer_sync::run_installer_sync_pass(&root, &prev_heads);
+        let mut store = state.store.lock().unwrap();
+        store.installer_sync.last_run_at = Some(now);
+        store.installer_sync.last_outcomes = outcomes;
+        store.installer_sync.last_synced_heads = new_heads;
+        drop(store);
+        state.save();
+    });
 }
 
 async fn check_expiring_tokens(state: Arc<AppState>, now: &chrono::DateTime<Utc>) {

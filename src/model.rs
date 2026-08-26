@@ -207,6 +207,13 @@ pub struct Store {
     /// なくなった場合の代替ログイン経路として機能する。
     #[serde(default)]
     pub totp_enabled: bool,
+    /// 2026-08-26追記(ユーザー指示「この様なインストーラーを分かりやすい
+    /// フォルダーに同期システムで自動で配置し直すRS-Syncとして、15分に
+    /// 1回でも良いのでその様に機能するようにして」): 各リポジトリの
+    /// Windowsインストーラーを定期的に再ビルドし、差分があればコミット・
+    /// pushする機能の設定・実行結果(`installer_sync`モジュール参照)。
+    #[serde(default)]
+    pub installer_sync: crate::installer_sync::InstallerSyncSettings,
 }
 
 pub struct AppState {
