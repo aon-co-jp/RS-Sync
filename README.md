@@ -2,7 +2,18 @@
 
 Git repository sync/backup tool across multiple git-hosting providers
 (GitHub / RS-Git / Gitea / Gitbucket), built with Rust + [poem](https://github.com/poem-web/poem).
+It also syncs plain folders (not just git repos) between your VPS/rental
+server, local drive, and NAS — see [`src/folder_sync.rs`](src/folder_sync.rs).
 日本語の説明は下にあります。
+
+## ⬇ Download / ダウンロード
+
+**Windows**: [rs-sync-installer.exe](https://github.com/aon-co-jp/RS-Sync/releases/latest/download/rs-sync-installer.exe)
+— double-click to install, no admin rights or command line needed. /
+ダブルクリックでインストールできます(管理者権限・コマンド操作不要)。
+
+**Linux**: [rs-sync-linux-x86_64.tar.gz](https://github.com/aon-co-jp/RS-Sync/releases/latest/download/rs-sync-linux-x86_64.tar.gz)
+(includes `install.sh`) — see [all releases](https://github.com/aon-co-jp/RS-Sync/releases).
 
 ## What it does (MVP)
 
