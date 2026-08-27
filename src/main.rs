@@ -972,11 +972,21 @@ fn update_backup_email(
 /// ——ユーザーが認証アプリへ登録し、実際に生成されたコードで
 /// `totp/enable`を呼んで初めて有効になる、という「動くことを確認して
 /// から切り替える」流れ)。
+///
+/// 2026-08-27追記(ユーザー指示「携帯電話番号でQRコード撮影の2FA」への
+/// 対応): レスポンスへ`qr_svg`(認証アプリのカメラで読み取れるQRコード、
+/// SVG文字列)を追加した。**従来のテキスト`secret`はそのまま維持**
+/// (QRを読み取れないガラケー等の端末では引き続き手入力で登録できる、
+/// open-easy-web側と同じ「テキストとQRの両方を提供する」設計方針)。
+/// QR生成に失敗した場合でも`secret`自体は返す(致命的エラーにしない
+/// ——テキスト手入力の経路は生かしたまま、`qr_svg`のみ`null`にする)。
 #[handler]
 fn totp_setup(auth_state: Data<&Arc<AuthState>>) -> Json<serde_json::Value> {
     let secret = rs_sync::totp::generate_secret();
     *auth_state.totp_secret.lock().unwrap() = Some(secret.clone());
-    Json(serde_json::json!({"secret": secret}))
+    let account_label = auth_state.admin_email.lock().unwrap().clone();
+    let qr_svg = rs_sync::totp::totp_qr_svg(&secret, &account_label, "RS-Sync").ok();
+    Json(serde_json::json!({"secret": secret, "qr_svg": qr_svg}))
 }
 
 #[derive(serde::Deserialize)]

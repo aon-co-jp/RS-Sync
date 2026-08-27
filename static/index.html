@@ -158,7 +158,8 @@ a{color:#fff}
       <button id="totp-disable-btn" data-i18n="totpDisableBtn">2段階認証を無効化</button>
     </div>
     <div id="totp-setup-panel" class="hidden">
-      <p class="hint" data-i18n="totpSetupHint">下の文字列を認証アプリ(Google Authenticator等)に手入力で追加し、表示された6桁コードを入力してください。</p>
+      <p class="hint" data-i18n="totpSetupHintQr">スマホの認証アプリ(Google Authenticator等)のカメラで下のQRコードを撮影して登録するか、読み取れない端末(ガラケー等)の場合は下の文字列を手入力で追加してください。いずれの方法でも表示された6桁コードを入力すれば有効化できます。</p>
+      <div id="totp-qr-container" aria-label="TOTP QR code"></div>
       <p id="totp-secret-display" class="bright" style="font-family:monospace"></p>
       <input id="totp-enable-code" type="text" inputmode="numeric" placeholder="123456">
       <div><button id="totp-enable-btn" data-i18n="totpEnableBtn">このコードで有効化</button></div>
@@ -407,6 +408,8 @@ const dict = {
    totpEnabledStatus:"有効", totpDisabledStatus:"無効",
    totpSetupBtn:"2段階認証を設定", totpDisableBtn:"2段階認証を無効化",
    totpSetupHint:"下の文字列を認証アプリ(Google Authenticator等)に手入力で追加し、表示された6桁コードを入力してください。",
+   totpSetupHintQr:"スマホの認証アプリ(Google Authenticator等)のカメラで下のQRコードを撮影して登録するか、読み取れない端末(ガラケー等)の場合は下の文字列を手入力で追加してください。いずれの方法でも表示された6桁コードを入力すれば有効化できます。",
+   totpQrUnavailable:"QRコードを生成できませんでした——下の文字列で登録してください。",
    totpEnableBtn:"このコードで有効化", totpEnabled:"2段階認証を有効化しました。",
    totpDisabled:"2段階認証を無効化しました。",
    accountsH:"アカウント", accountsHint:"GitHub・open-gitea・Gitea・GitBucket・GitLab・Bitbucketいずれかのプロバイダで、同期のソース(コピー元)または宛先(コピー先)として使うアカウントを登録します(レンタルサーバー・VPS上で動かしている自前のGitea/GitBucket/open-giteaも、そのURLを指定すれば同様に登録できます)。トークンは同期実行時にサーバー内部でのみ使用し、一覧には表示されません。",
@@ -487,6 +490,8 @@ const dict = {
    totpEnabledStatus:"Enabled", totpDisabledStatus:"Disabled",
    totpSetupBtn:"Set up 2FA", totpDisableBtn:"Disable 2FA",
    totpSetupHint:"Add the string below to an authenticator app (e.g. Google Authenticator) manually, then enter the 6-digit code it shows.",
+   totpSetupHintQr:"Scan the QR code below with your authenticator app's camera to register it, or if your device can't read QR codes (e.g. a feature phone), add the string below manually instead. Either way, enter the 6-digit code it shows to enable.",
+   totpQrUnavailable:"QR code unavailable — use the text secret below.",
    totpEnableBtn:"Enable with this code", totpEnabled:"Two-factor authentication enabled.",
    totpDisabled:"Two-factor authentication disabled.",
    accountsH:"Accounts", accountsHint:"Register accounts (GitHub, open-gitea, Gitea, GitBucket, GitLab, or Bitbucket) to use as a sync source or destination — including self-hosted Gitea/GitBucket/open-gitea instances running on your own rented server or VPS, just point it at that URL. The token is only ever used server-side during sync and is never shown back in the list.",
@@ -734,9 +739,22 @@ document.getElementById("settings-admin-phone-save").onclick = async ()=>{
 
 document.getElementById("totp-setup-btn").onclick = async ()=>{
   const resultEl = document.getElementById("totp-setup-result");
+  const qrContainer = document.getElementById("totp-qr-container");
   try {
     const data = await api("api/auth/totp/setup", {method:"POST"});
     document.getElementById("totp-secret-display").textContent = data.secret;
+    // 2026-08-27追加: サーバーが生成したQRコード(SVG文字列)を表示する。
+    // このSVGはこのページ自身のサーバー(rs-sync本体)が、ユーザー入力を
+    // 一切経由せずランダム生成した秘密鍵から都度組み立てたものであり
+    // (`src/totp.rs::totp_qr_svg`)、外部由来の信頼できない文字列では
+    // ないためinnerHTMLでの挿入としている。QR生成に失敗した場合
+    // (`data.qr_svg`が無い場合)はテキストシークレットのみで登録を
+    // 続行できる旨を表示する(致命的エラーにしない)。
+    if (data.qr_svg) {
+      qrContainer.innerHTML = data.qr_svg;
+    } else {
+      qrContainer.textContent = dict[lang].totpQrUnavailable || "QR code unavailable — use the text secret below. / QRコードを生成できませんでした——下の文字列で登録してください。";
+    }
     document.getElementById("totp-setup-panel").classList.remove("hidden");
     resultEl.textContent = "";
   } catch(e) { resultEl.textContent = dict[lang].settingsError + String(e); }

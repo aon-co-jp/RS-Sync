@@ -43,6 +43,13 @@ russh-sftp = "2"
 async-trait = "0.1"
 walkdir = "2"
 smb2 = "0.16.1"
+# 2026-08-27: TOTPセットアップ画面に実際のQRコード(スマホのカメラ/
+# 認証アプリで撮影・読み取り可能な画像)を追加するため。pure Rust実装
+# (ネイティブC依存無し)、SVGレンダリング機能のみ使用しビットマップ画像
+# ライブラリへの依存は増やさない。既存のテキストシークレット表示
+# (ガラケー等QRを読めない端末向け、open-easy-web側と同じ設計方針)は
+# 維持したまま、QRコードを追加のオプションとして併記する。
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
 [dev-dependencies]
 tempfile = "3"
