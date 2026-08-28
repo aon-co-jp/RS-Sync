@@ -7,10 +7,22 @@
 //! 中止」、2026-08-13)。このモジュールはGoogleカレンダーへの予定作成
 //! のみを扱う。OAuth 2.0クライアントID/シークレットはこのリポジトリに
 //! 同梱しない(第三者の資格情報を配布しない、既存のRustJSON/OTP等と
-//! 同じ「ユーザー自身の資格情報を環境変数で渡す」方針)——利用するには
-//! Google Cloud Consoleで自分のOAuthクライアントを作成し、
+//! 同じ「ユーザー自身の資格情報を渡す」方針)——利用するには
+//! Google Cloud Consoleで自分のOAuthクライアントを作成する必要がある。
+//!
+//! 資格情報の渡し方は2通り(2026-08-28、後者を新設): (1)
 //! `RS_SYNC_GOOGLE_CLIENT_ID`/`RS_SYNC_GOOGLE_CLIENT_SECRET`/
-//! `RS_SYNC_GOOGLE_REDIRECT_URI`を設定する必要がある。
+//! `RS_SYNC_GOOGLE_REDIRECT_URI`環境変数、(2) ログイン中の管理者が
+//! `GET/PUT /api/google/credentials`(`main.rs`)経由でフォームから直接
+//! 入力・保存する方式(`StoredGoogleOAuthCreds`、`Store`へ永続化)。
+//! **ユーザー指示「発行されたクライアントID/シークレットは、ログイン後の
+//! フォームに入力するように変更して」への対応**——従来は「発行された
+//! 値を管理者へ知らせてVPSの環境変数に設定してもらう」という運用者と
+//! 利用者が分離した前提の案内文だったが、このアプリは単一管理者制
+//! (ログインできる=管理者本人)のため、その本人がそのまま画面から
+//! 入力できる方が自然だと判断した。`GoogleOAuthConfig::resolve()`が
+//! 保存済みの値を優先し、無ければ環境変数へフォールバックする
+//! (既存の`admin_email_override`等と同じ「環境変数は初期値」パターン)。
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
@@ -34,6 +46,35 @@ impl GoogleOAuthConfig {
             .unwrap_or_else(|_| "http://127.0.0.1:8095/api/auth/google/callback".to_string());
         Some(Self { client_id, client_secret, redirect_uri })
     }
+
+    /// 管理者がフォームから保存した資格情報(`stored`)があればそちらを
+    /// 優先し、無ければ環境変数(`from_env`)へフォールバックする。
+    pub fn resolve(stored: Option<&StoredGoogleOAuthCreds>) -> Option<Self> {
+        if let Some(creds) = stored {
+            if !creds.client_id.is_empty() && !creds.client_secret.is_empty() {
+                let redirect_uri = creds
+                    .redirect_uri
+                    .clone()
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| std::env::var("RS_SYNC_GOOGLE_REDIRECT_URI").ok())
+                    .unwrap_or_else(|| "http://127.0.0.1:8095/api/auth/google/callback".to_string());
+                return Some(Self { client_id: creds.client_id.clone(), client_secret: creds.client_secret.clone(), redirect_uri });
+            }
+        }
+        Self::from_env()
+    }
+}
+
+/// フォームから入力・保存されたGoogle OAuth資格情報(2026-08-28新設)。
+/// `client_secret`はサーバー内部の`Store`にのみ保持し、APIレスポンスへ
+/// 生の値を再表示することは無い(既存のアカウントトークンと同じ
+/// 「一度保存した秘密情報は画面へ再表示しない」方針)。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredGoogleOAuthCreds {
+    pub client_id: String,
+    pub client_secret: String,
+    #[serde(default)]
+    pub redirect_uri: Option<String>,
 }
 
 /// Googleカレンダーへの書き込み権限のみを要求する(閲覧のみの
@@ -281,6 +322,48 @@ mod tests {
             redirect_uri: "http://x".to_string(),
         };
         assert!(config.client_id.is_empty());
+    }
+
+    #[test]
+    fn resolve_prefers_stored_credentials_over_env() {
+        let stored = StoredGoogleOAuthCreds {
+            client_id: "stored-id".to_string(),
+            client_secret: "stored-secret".to_string(),
+            redirect_uri: Some("https://example.com/cb".to_string()),
+        };
+        let config = GoogleOAuthConfig::resolve(Some(&stored)).unwrap();
+        assert_eq!(config.client_id, "stored-id");
+        assert_eq!(config.client_secret, "stored-secret");
+        assert_eq!(config.redirect_uri, "https://example.com/cb");
+    }
+
+    #[test]
+    fn resolve_falls_back_to_default_redirect_uri_when_stored_one_is_empty() {
+        let stored = StoredGoogleOAuthCreds { client_id: "id".to_string(), client_secret: "secret".to_string(), redirect_uri: None };
+        let config = GoogleOAuthConfig::resolve(Some(&stored)).unwrap();
+        assert_eq!(config.client_id, "id");
+        assert!(config.redirect_uri.contains("/api/auth/google/callback"));
+    }
+
+    #[test]
+    fn resolve_ignores_stored_credentials_with_empty_client_id_or_secret() {
+        // このファイルの他のテストはRS_SYNC_GOOGLE_*環境変数を一切
+        // 触らないため、直列化ロック無しでremove_varしても安全
+        // (open-english/auth.rsの`smtp_config_requires_all_four_vars`と
+        // 同じ考え方)。
+        std::env::remove_var("RS_SYNC_GOOGLE_CLIENT_ID");
+        std::env::remove_var("RS_SYNC_GOOGLE_CLIENT_SECRET");
+        let stored = StoredGoogleOAuthCreds { client_id: "".to_string(), client_secret: "secret".to_string(), redirect_uri: None };
+        // 空のclient_idは無視され、from_env()へフォールバックする
+        // (環境変数も未設定のためNoneになる)。
+        assert!(GoogleOAuthConfig::resolve(Some(&stored)).is_none());
+    }
+
+    #[test]
+    fn resolve_returns_none_when_nothing_is_configured() {
+        std::env::remove_var("RS_SYNC_GOOGLE_CLIENT_ID");
+        std::env::remove_var("RS_SYNC_GOOGLE_CLIENT_SECRET");
+        assert!(GoogleOAuthConfig::resolve(None).is_none());
     }
 
     #[test]

@@ -42,6 +42,51 @@ RS-Git/RPoem等と同じ方針: `poem`クレートを直接利用する単純な
   配下にマウントされても壊れないようにするため(open-gitea(現RS-Git)の`/rgit`デプロイ
   で絶対パスfetchが壊れた教訓を踏襲)。
 
+## HANDOFF追記(2026-08-28) Google連携の資格情報を「管理者へ連絡→VPS環境変数」から「ログイン後のフォームに直接入力」へ変更
+
+ユーザー指示「発行されたクライアントID/クライアントシークレットは、
+ログイン後のフォームに入力するように変更して」への対応。従来の
+案内文(4)「発行されたクライアントID/クライアントシークレットを管理者へ
+お知らせいただければ、VPSの環境変数に設定して再起動します」は、この
+アプリが単一管理者制(ログインできる=管理者本人)であることを踏まえると
+迂遠で分かりにくい、というユーザー指摘に基づく。
+
+1. **`src/google_calendar.rs`**: `StoredGoogleOAuthCreds`
+   (`client_id`/`client_secret`/`redirect_uri`)を新設。
+   `GoogleOAuthConfig::resolve(stored)`が保存済みの値を優先し、無ければ
+   既存の環境変数(`RS_SYNC_GOOGLE_CLIENT_ID`等)へフォールバックする
+   (既存の`admin_email_override`等と同じ「環境変数は初期値」パターン)。
+2. **`src/model.rs`**: `Store.google_oauth_creds: Option<StoredGoogleOAuthCreds>`
+   を追加、`data/store.json`へ永続化。
+3. **`src/main.rs`**: `GET/PUT /api/google/credentials`(管理者ログイン
+   必須、既存の`RequireAuth`保護下)を新設。**クライアントシークレットは
+   一度保存すると画面へ二度と再表示しない**(既存のアカウントトークンと
+   同じ方針)。`PUT`時にシークレットを空欄で送ると「既存の保存済み
+   シークレットを維持する」という意味になる(クライアントIDだけ直したい
+   場合に毎回シークレットを貼り直す必要をなくすための設計、初回設定時
+   のみシークレット必須)。既存5箇所の`GoogleOAuthConfig::from_env()`
+   呼び出しを全て`resolve()`経由へ変更。
+4. **`static/index.html`**: Googleカレンダー連携セクションへ資格情報
+   入力フォーム(クライアントID・クライアントシークレット・リダイレクト
+   URI)を追加。リダイレクトURIは空欄なら`location.href`から自動計算
+   (`defaultGoogleRedirectUri()`)。既存の「(4)管理者へお知らせ
+   いただければ…」という案内文を「(4)発行された値を下記フォームに
+   直接入力して保存してください(管理者への連絡やVPSの環境変数設定は
+   不要です)」へ日英とも書き換えた。
+5. **検証(実測)**: `cargo build`/`cargo test --lib`**76件全green**
+   (新規4件: `google_calendar::tests`の`resolve_*`)。実際にサーバーを
+   起動しcurlで(a) 空client_id→400、(b) 初回設定でシークレット空欄→400
+   (「初めて設定する場合は…」)、(c) 正しい値での初回保存→
+   `configured:true`、(d) クライアントIDだけ変更・シークレット空欄で
+   PUT→既存シークレットが保持されたまま(`client_secret_set:true`)
+   client_idのみ更新されること、を確認。さらに実ブラウザ(Claude
+   Browser)で実際にフォームを操作し、クライアントID欄の値を書き換えて
+   「保存」をクリック→サーバー側に実際に反映される(curlで確認)ことを
+   実UI操作で確認した。コンソールエラー無し。
+- 次にすべきこと: 実際のGoogle Cloud Consoleで発行した資格情報を使った
+  OAuthログイン〜カレンダー同期のフルE2E(ユーザー自身の操作が必要、
+  従来から未実施のまま持ち越し)。
+
 ## HANDOFF追記(2026-08-27) TOTPセットアップ画面に実際のQRコード(SVG)表示を追加
 
 ユーザー指示「e-mailでワンタイムパスワードか携帯電話番号でQRコード

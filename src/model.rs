@@ -181,6 +181,16 @@ pub struct Store {
     /// `AuthState`と同じ設計)。
     #[serde(default)]
     pub google_tokens: Option<crate::google_calendar::StoredGoogleTokens>,
+    /// 2026-08-28追記(ユーザー指示「発行されたクライアントID/シークレットは、
+    /// ログイン後のフォームに入力するように変更して」): 従来は
+    /// `RS_SYNC_GOOGLE_CLIENT_ID`等の環境変数のみで、利用者が発行された
+    /// 値を「管理者」へ伝えVPSの環境変数へ設定してもらう運用だった。
+    /// 単一管理者制のこのアプリでは、その管理者本人がログイン後の画面
+    /// から直接入力・保存できる方が自然なため、この永続化フィールドを
+    /// 新設した(`google_calendar::GoogleOAuthConfig::resolve`が環境変数
+    /// より優先して使う)。
+    #[serde(default)]
+    pub google_oauth_creds: Option<crate::google_calendar::StoredGoogleOAuthCreds>,
     /// 2026-08-13追記(ユーザー指示「ログインのe-mailアドレスも変更可能に
     /// して」): 管理者がAPI経由で変更した場合にここへ永続化する。
     /// `None`の間は`RS_SYNC_ADMIN_EMAIL`環境変数の値が使われる

@@ -91,9 +91,64 @@ fn json_ok_with_status(status: StatusCode, value: &serde_json::Value) -> Respons
 
 #[handler]
 fn google_calendar_status(state: Data<&Arc<AppState>>) -> Json<serde_json::Value> {
-    let configured = rs_sync::google_calendar::GoogleOAuthConfig::from_env().is_some();
-    let connected = state.store.lock().unwrap().google_tokens.is_some();
+    let store = state.store.lock().unwrap();
+    let configured = rs_sync::google_calendar::GoogleOAuthConfig::resolve(store.google_oauth_creds.as_ref()).is_some();
+    let connected = store.google_tokens.is_some();
     Json(serde_json::json!({"configured": configured, "connected": connected}))
+}
+
+/// 2026-08-28新設(ユーザー指示「発行されたクライアントID/シークレットは、
+/// ログイン後のフォームに入力するように変更して」への対応)。
+/// `client_secret`は一度保存したら再表示しない(既存のアカウントトークン
+/// と同じ方針)——保存済みかどうかは`client_secret_set`のみで示す。
+#[handler]
+fn get_google_credentials(state: Data<&Arc<AppState>>) -> Json<serde_json::Value> {
+    let store = state.store.lock().unwrap();
+    match &store.google_oauth_creds {
+        Some(creds) => Json(serde_json::json!({
+            "client_id": creds.client_id,
+            "client_secret_set": !creds.client_secret.is_empty(),
+            "redirect_uri": creds.redirect_uri,
+        })),
+        None => Json(serde_json::json!({"client_id": null, "client_secret_set": false, "redirect_uri": null})),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct UpdateGoogleCredentialsReq {
+    client_id: String,
+    client_secret: String,
+    #[serde(default)]
+    redirect_uri: Option<String>,
+}
+
+/// クライアントシークレットは空欄で送ると「既存の保存済みシークレットを
+/// 維持する」という意味になる(画面には二度と再表示しないため、
+/// クライアントIDやリダイレクトURIだけ直したい場合に毎回シークレットを
+/// 貼り直す必要が無いようにするための設計)。初回設定時(保存済みの
+/// シークレットがまだ無い)は空欄のままだと拒否する。
+#[handler]
+fn update_google_credentials(state: Data<&Arc<AppState>>, Json(req): Json<UpdateGoogleCredentialsReq>) -> Response {
+    let client_id = req.client_id.trim().to_string();
+    let client_secret = req.client_secret.trim().to_string();
+    if client_id.is_empty() {
+        return error_response(StatusCode::BAD_REQUEST, "クライアントIDを入力してください。 / Client ID is required.");
+    }
+    let redirect_uri = req.redirect_uri.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let mut store = state.store.lock().unwrap();
+    let existing_secret = store.google_oauth_creds.as_ref().map(|c| c.client_secret.clone());
+    let resolved_secret = if client_secret.is_empty() { existing_secret } else { Some(client_secret) };
+    let Some(resolved_secret) = resolved_secret else {
+        drop(store);
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "初めて設定する場合はクライアントシークレットの入力が必要です。 / Client secret is required the first time you configure this.",
+        );
+    };
+    store.google_oauth_creds = Some(rs_sync::google_calendar::StoredGoogleOAuthCreds { client_id: client_id.clone(), client_secret: resolved_secret, redirect_uri });
+    drop(store);
+    state.save();
+    json_ok(&serde_json::json!({"ok": true, "client_id": client_id}))
 }
 
 /// 実バグ修正(実装中に発見): このエンドポイントはBearerセッション
@@ -104,10 +159,11 @@ fn google_calendar_status(state: Data<&Arc<AppState>>) -> Json<serde_json::Value
 /// 手動で遷移させる設計にした(HTTPリダイレクトそのものは使わない)。
 #[handler]
 fn google_calendar_login(state: Data<&Arc<AppState>>) -> Response {
-    let Some(config) = rs_sync::google_calendar::GoogleOAuthConfig::from_env() else {
+    let stored_creds = state.store.lock().unwrap().google_oauth_creds.clone();
+    let Some(config) = rs_sync::google_calendar::GoogleOAuthConfig::resolve(stored_creds.as_ref()) else {
         return json_ok_with_status(
             StatusCode::SERVICE_UNAVAILABLE,
-            &serde_json::json!({"error": "Google OAuth is not configured on this server (RS_SYNC_GOOGLE_CLIENT_ID/RS_SYNC_GOOGLE_CLIENT_SECRET)"}),
+            &serde_json::json!({"error": "Google OAuth is not configured on this server yet. Save your client ID/secret in the form above, or set RS_SYNC_GOOGLE_CLIENT_ID/RS_SYNC_GOOGLE_CLIENT_SECRET."}),
         );
     };
     let state_token = model::new_id();
@@ -137,7 +193,8 @@ fn google_calendar_callback(
     if expected.as_deref() != Some(got_state.as_str()) {
         return json_ok_with_status(StatusCode::BAD_REQUEST, &serde_json::json!({"error": "state mismatch"}));
     }
-    let Some(config) = rs_sync::google_calendar::GoogleOAuthConfig::from_env() else {
+    let stored_creds = state.store.lock().unwrap().google_oauth_creds.clone();
+    let Some(config) = rs_sync::google_calendar::GoogleOAuthConfig::resolve(stored_creds.as_ref()) else {
         return json_ok_with_status(StatusCode::SERVICE_UNAVAILABLE, &serde_json::json!({"error": "not configured"}));
     };
     match rs_sync::google_calendar::exchange_code_for_tokens(&config, &code) {
@@ -165,15 +222,12 @@ fn sync_schedule_to_google_calendar_blocking(
     job_name: &str,
     schedule: &Schedule,
 ) -> Result<usize, String> {
-    let config = rs_sync::google_calendar::GoogleOAuthConfig::from_env()
-        .ok_or_else(|| "not configured".to_string())?;
-    let tokens = state
-        .store
-        .lock()
-        .unwrap()
-        .google_tokens
-        .clone()
-        .ok_or_else(|| "not connected".to_string())?;
+    let (stored_creds, tokens) = {
+        let store = state.store.lock().unwrap();
+        (store.google_oauth_creds.clone(), store.google_tokens.clone())
+    };
+    let config = rs_sync::google_calendar::GoogleOAuthConfig::resolve(stored_creds.as_ref()).ok_or_else(|| "not configured".to_string())?;
+    let tokens = tokens.ok_or_else(|| "not connected".to_string())?;
     let refreshed = rs_sync::google_calendar::refresh_if_needed(&config, &tokens).map_err(|e| e.to_string())?;
     if refreshed.access_token != tokens.access_token {
         let mut store = state.store.lock().unwrap();
@@ -423,10 +477,13 @@ struct UpdateScheduleReq {
 /// (この通知はベストエフォートの補助機能であり、本来の同期処理を
 /// 妨げてはならないため)。
 fn google_notify_cancelled_blocking(state: &Arc<AppState>, job_name: &str) {
-    let Some(config) = rs_sync::google_calendar::GoogleOAuthConfig::from_env() else {
+    let (stored_creds, tokens_opt) = {
+        let store = state.store.lock().unwrap();
+        (store.google_oauth_creds.clone(), store.google_tokens.clone())
+    };
+    let Some(config) = rs_sync::google_calendar::GoogleOAuthConfig::resolve(stored_creds.as_ref()) else {
         return;
     };
-    let tokens_opt = { state.store.lock().unwrap().google_tokens.clone() };
     let Some(tokens) = tokens_opt else {
         return;
     };
@@ -1160,6 +1217,7 @@ fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::End
         .at("/jobs/:id/sync-google-calendar", post(sync_job_to_google_calendar))
         .at("/google/status", get(google_calendar_status))
         .at("/google/login", get(google_calendar_login))
+        .at("/google/credentials", get(get_google_credentials).put(update_google_credentials))
         .at("/auth/admin-email", get(get_admin_email).put(update_admin_email))
         .at("/auth/backup-email", get(get_backup_email).put(update_backup_email))
         .at("/auth/admin-phone", get(get_admin_phone).put(update_admin_phone))

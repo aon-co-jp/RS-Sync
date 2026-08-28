@@ -173,6 +173,17 @@ a{color:#fff}
 <h2 data-i18n="googleCalendarSectionH">Googleカレンダー連携</h2>
 <p class="hint" data-i18n="googleCalendarDesc">設定したカレンダーから作成した次回予定など、最大1年分の月日と時刻を保存できます。このデータはGoogleカレンダーに保存でき、非公開設定も可能です。Googleアカウントでログインすると、Googleカレンダーへ保存して連動できます。</p>
 <p id="google-calendar-status" class="hint"></p>
+<div id="google-credentials-form">
+  <p class="hint" data-i18n="googleCredsFormHint">Google Cloud Consoleで発行した資格情報をここに直接入力・保存してください(サーバーの環境変数設定は不要です)。</p>
+  <label class="bright" for="google-creds-client-id" data-i18n="googleCredsClientIdLabel">クライアントID</label>
+  <input id="google-creds-client-id" type="text" placeholder="xxxxxxxxxxxx.apps.googleusercontent.com">
+  <label class="bright" for="google-creds-client-secret" data-i18n="googleCredsClientSecretLabel">クライアントシークレット(保存後は再表示されません)</label>
+  <input id="google-creds-client-secret" type="password" placeholder="GOCSPX-...">
+  <label class="bright" for="google-creds-redirect-uri" data-i18n="googleCredsRedirectUriLabel">リダイレクトURI(空欄なら自動でこのページのURLから計算します)</label>
+  <input id="google-creds-redirect-uri" type="text">
+  <div><button type="button" id="google-creds-save-btn" data-i18n="save">保存</button></div>
+  <p id="google-creds-result" class="hint"></p>
+</div>
 <div class="buttons"><button type="button" id="google-calendar-login-btn" onclick="startGoogleLogin()" data-i18n="googleCalendarLogin">Googleでログイン</button></div>
 
 <h2 data-i18n="quickH">クイック設定: マスター→コピー先(複数可)</h2>
@@ -471,8 +482,13 @@ const dict = {
    googleCalendarDesc:"設定したカレンダーから作成した次回予定など、最大1年分の月日と時刻を保存できます。このデータはGoogleカレンダーに保存でき、非公開設定も可能です。Googleアカウントでログインすると、Googleカレンダーへ保存して連動できます。",
    googleCalendarLogin:"Googleでログイン", googleCalendarConnected:"接続済み", googleCalendarNotConnected:"未接続",
    googleCalendarSyncBtn:"このジョブの予定をGoogleカレンダーへ同期", googleCalendarSyncResult:"Googleカレンダーへ同期しました。",
-   googleCalendarNotConfigured:"このサーバーにはGoogle連携用の資格情報(RS_SYNC_GOOGLE_CLIENT_ID等)が設定されていません。管理者に設定を依頼してください。",
-   googleCalendarSetupSteps:"実際に使うには、あなた自身がGoogle Cloud Consoleで以下を行っていただく必要があります: (1) Google Cloud Consoleで新規プロジェクト(または既存プロジェクト)を用意。(2) OAuth同意画面を設定、OAuth 2.0クライアントID(種類: ウェブアプリケーション)を作成。(3) 承認済みリダイレクトURIに https://easy-web.tokyo/rs-sync/api/auth/google/callback を追加(このURLの部分はご自分のURLに合わせてご使用下さい)。(4) 発行された「クライアントID」「クライアントシークレット」を管理者へお知らせいただければ、VPSの環境変数に設定して再起動します。"},
+   googleCalendarNotConfigured:"このサーバーにはGoogle連携用の資格情報がまだ設定されていません。下記のフォームから直接設定できます。",
+   googleCalendarSetupSteps:"実際に使うには、あなた自身がGoogle Cloud Consoleで以下を行っていただく必要があります: (1) Google Cloud Consoleで新規プロジェクト(または既存プロジェクト)を用意。(2) OAuth同意画面を設定、OAuth 2.0クライアントID(種類: ウェブアプリケーション)を作成。(3) 承認済みリダイレクトURIに下記フォームの「リダイレクトURI」欄の値をそのまま追加。(4) 発行された「クライアントID」「クライアントシークレット」を下記フォームに直接入力して保存してください(管理者への連絡やVPSの環境変数設定は不要です)。",
+   googleCredsFormHint:"Google Cloud Consoleで発行した資格情報をここに直接入力・保存してください(サーバーの環境変数設定は不要です)。",
+   googleCredsClientIdLabel:"クライアントID",
+   googleCredsClientSecretLabel:"クライアントシークレット(保存後は再表示されません)",
+   googleCredsRedirectUriLabel:"リダイレクトURI(空欄なら自動でこのページのURLから計算します)",
+   googleCredsNeedBoth:"クライアントIDとクライアントシークレットの両方を入力してください。"},
  en: {title:"RS-Sync — Git Repository Sync Tool", intro:"One-way backup or two-way sync of repositories across GitHub / open-gitea / Gitea / Gitbucket.",
    loginH:"Login", loginNote:"For security reasons, only the registered admin email can log in.",
    loginEmailLabel:"Admin email address", sendCode:"Send code", loginCodeLabel:"Received code (6 digits)", login:"Log in",
@@ -553,8 +569,13 @@ const dict = {
    googleCalendarDesc:"Dates and times you set on the calendar (up to a year of upcoming events) can be saved. This data can be stored in Google Calendar, with a private visibility option. Sign in with your Google account to save and sync them to Google Calendar.",
    googleCalendarLogin:"Sign in with Google", googleCalendarConnected:"Connected", googleCalendarNotConnected:"Not connected",
    googleCalendarSyncBtn:"Sync this job's schedule to Google Calendar", googleCalendarSyncResult:"Synced to Google Calendar.",
-   googleCalendarNotConfigured:"This server has no Google integration credentials configured (RS_SYNC_GOOGLE_CLIENT_ID etc.). Ask your administrator to set them up.",
-   googleCalendarSetupSteps:"To actually use this, you (the administrator) need to do the following in Google Cloud Console: (1) Set up a new (or existing) project in Google Cloud Console. (2) Configure the OAuth consent screen and create an OAuth 2.0 client ID (type: Web application). (3) Add https://easy-web.tokyo/rs-sync/api/auth/google/callback to the authorized redirect URIs (replace this URL with your own deployment's URL). (4) Send the issued \"Client ID\" and \"Client Secret\" to your administrator, who will set them as environment variables on the VPS and restart the service."}
+   googleCalendarNotConfigured:"This server has no Google integration credentials configured yet. You can set them up directly in the form below.",
+   googleCalendarSetupSteps:"To actually use this, you need to do the following in Google Cloud Console: (1) Set up a new (or existing) project in Google Cloud Console. (2) Configure the OAuth consent screen and create an OAuth 2.0 client ID (type: Web application). (3) Add the value shown in the \"Redirect URI\" field below to the authorized redirect URIs, exactly as-is. (4) Enter the issued \"Client ID\" and \"Client Secret\" directly into the form below and save (no need to contact an administrator or set VPS environment variables).",
+   googleCredsFormHint:"Enter the credentials you obtained from Google Cloud Console directly here and save (no server environment variables needed).",
+   googleCredsClientIdLabel:"Client ID",
+   googleCredsClientSecretLabel:"Client secret (never shown again after saving)",
+   googleCredsRedirectUriLabel:"Redirect URI (leave blank to auto-fill from this page's URL)",
+   googleCredsNeedBoth:"Please enter both the client ID and client secret."}
 };
 let lang = "ja";
 function applyI18n(){
@@ -734,6 +755,23 @@ document.getElementById("settings-admin-phone-save").onclick = async ()=>{
     await api("api/auth/admin-phone", {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({admin_phone})});
     resultEl.textContent = dict[lang].settingsSaved;
     renderAccountSettings();
+  } catch(e) { resultEl.textContent = dict[lang].settingsError + String(e); }
+};
+
+document.getElementById("google-creds-save-btn").onclick = async ()=>{
+  const resultEl = document.getElementById("google-creds-result");
+  const client_id = document.getElementById("google-creds-client-id").value.trim();
+  // 空欄のまま送ると「既存の保存済みシークレットを維持」の意味になる
+  // (サーバー側`update_google_credentials`参照、初回設定時のみ必須)。
+  const client_secret = document.getElementById("google-creds-client-secret").value.trim();
+  const redirect_uri = document.getElementById("google-creds-redirect-uri").value.trim();
+  if (!client_id) { resultEl.textContent = dict[lang].googleCredsNeedBoth; return; }
+  try {
+    const body = await api("api/google/credentials", {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({client_id, client_secret, redirect_uri})});
+    if (body && body.error) { resultEl.textContent = body.error; return; }
+    document.getElementById("google-creds-client-secret").value = "";
+    resultEl.textContent = dict[lang].settingsSaved;
+    await renderGoogleCalendarStatus();
   } catch(e) { resultEl.textContent = dict[lang].settingsError + String(e); }
 };
 
@@ -1549,6 +1587,30 @@ async function renderGoogleCalendarStatus(){
         : `<span class="pill err">${dict[lang].googleCalendarNotConnected}</span>`;
       loginBtn.classList.toggle("hidden", status.connected);
     }
+  } catch (e) { /* 401 already handled in api() */ }
+  await loadGoogleCredentialsForm();
+}
+
+// 2026-08-28新設(ユーザー指示「発行されたクライアントID/シークレットは、
+// ログイン後のフォームに入力するように変更して」への対応)。クライアント
+// シークレットは保存後に絶対に再表示しない(サーバー側も生の値を返さない
+// 設計)——ここではclient_idと「設定済みかどうか」だけを反映する。
+function defaultGoogleRedirectUri(){
+  const base = location.href.split("#")[0].split("?")[0].replace(/\/?$/, "/");
+  return base + "api/auth/google/callback";
+}
+
+async function loadGoogleCredentialsForm(){
+  try {
+    const creds = await api("api/google/credentials");
+    const clientIdEl = document.getElementById("google-creds-client-id");
+    if (document.activeElement !== clientIdEl) clientIdEl.value = creds.client_id || "";
+    const secretEl = document.getElementById("google-creds-client-secret");
+    secretEl.placeholder = creds.client_secret_set
+      ? (lang === "ja" ? "設定済み(変更する場合のみ入力)" : "Already set (leave blank to keep)")
+      : "GOCSPX-...";
+    const redirectEl = document.getElementById("google-creds-redirect-uri");
+    if (!redirectEl.value) redirectEl.value = creds.redirect_uri || defaultGoogleRedirectUri();
   } catch (e) { /* 401 already handled in api() */ }
 }
 
