@@ -50,6 +50,10 @@ smb2 = "0.16.1"
 # (ガラケー等QRを読めない端末向け、open-easy-web側と同じ設計方針)は
 # 維持したまま、QRコードを追加のオプションとして併記する。
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+# 2026-08-28: 週次ログメール送信(ユーザー指示「ログの送信依頼は、
+# 1週間に一度圧縮して...送付」)でログをgzip圧縮してメール添付するため。
+# pure Rust実装、ネイティブC依存無し。
+flate2 = "1"
 
 [dev-dependencies]
 tempfile = "3"

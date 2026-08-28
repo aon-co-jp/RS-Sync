@@ -100,6 +100,69 @@ pub async fn run_scheduler_loop(state: Arc<AppState>) {
         // 再ビルド・差分push する。ブロッキングI/O(cargo build・ISCC・
         // git)のため他ジョブと同じく`spawn_blocking`経由。
         maybe_run_installer_sync(state.clone(), &now).await;
+
+        // 2026-08-28追記(ユーザー指示「表示ログは直近の1ヶ月分だけと
+        // します。それ以外のログなどは自動削除して下さい」): ジョブが
+        // 実行されない期間が続いても、時間経過だけで古いログが自動的に
+        // 消えるよう、tickごとに軽くチェックする(実際の削除が起きた
+        // ときだけ保存する、という理由で`prune_old_logs`は変更有無を
+        // 返す設計にしてある)。
+        let pruned = {
+            let mut store = state.store.lock().unwrap();
+            crate::model::prune_old_logs(&mut store.logs)
+        };
+        if pruned {
+            state.save();
+        }
+
+        // 2026-08-28追記(ユーザー指示「ログの送信依頼は、1週間に一度
+        // 圧縮して、指定したメールアドレスへ送付。送信依頼にチェックを
+        // 付けなければ送信しない」): オプトインのチェックボックスが
+        // 有効かつ前回送信から7日以上経過していれば、現在保持している
+        // ログ(直近1ヶ月分)をgzip圧縮してメール添付で送る。
+        maybe_send_weekly_log_email(state.clone(), &now).await;
+    }
+}
+
+/// 直近30日分のログをgzip圧縮し、設定された送信先(主メール/予備メール)
+/// へメール添付で送る。`log_email_enabled`が無効、送信先が解決できない、
+/// SMTP未設定のいずれかの場合は静かに何もしない(この機能は完全に
+/// オプトインのため、未設定を黙ってエラー扱いにしない)。
+async fn maybe_send_weekly_log_email(state: Arc<AppState>, now: &chrono::DateTime<Utc>) {
+    const SEND_INTERVAL_DAYS: i64 = 7;
+    let now = *now;
+    let (due, to, logs_json) = {
+        let store = state.store.lock().unwrap();
+        if !store.log_email_enabled {
+            return;
+        }
+        let due = store.log_email_last_sent_at.map(|t| (now - t).num_days() >= SEND_INTERVAL_DAYS).unwrap_or(true);
+        let to = store.resolve_log_email_target();
+        let logs_json = serde_json::to_string_pretty(&store.logs).unwrap_or_default();
+        (due, to, logs_json)
+    };
+    if !due {
+        return;
+    }
+    let Some(to) = to else {
+        tracing::warn!("weekly log email is enabled but no destination email is resolvable (primary and backup are both empty)");
+        return;
+    };
+    let Some(smtp) = state.smtp.clone() else {
+        tracing::warn!("weekly log email is enabled but SMTP is not configured");
+        return;
+    };
+    let state2 = state.clone();
+    let result = tokio::task::spawn_blocking(move || crate::mail::send_compressed_log_email(&smtp, &to, &logs_json)).await;
+    match result {
+        Ok(Ok(())) => {
+            let mut store = state2.store.lock().unwrap();
+            store.log_email_last_sent_at = Some(Utc::now());
+            drop(store);
+            state2.save();
+        }
+        Ok(Err(e)) => tracing::warn!("failed to send weekly log email: {e}"),
+        Err(e) => tracing::warn!("weekly log email task panicked: {e}"),
     }
 }
 
@@ -444,11 +507,10 @@ fn execute_job_inner(state: Arc<AppState>, job_id: &str) -> Option<crate::sync_e
             success: outcome.success,
             message: outcome.message.clone(),
         });
-        // keep log growth bounded
-        let len = store.logs.len();
-        if len > 500 {
-            store.logs.drain(0..len - 500);
-        }
+        // 2026-08-28変更: 件数上限(旧: 500件)ではなく日数基準
+        // (直近1ヶ月分のみ保持、ユーザー指示「表示ログは直近の1ヶ月分だけ
+        // とします。それ以外のログなどは自動削除して下さい」)へ変更。
+        crate::model::prune_old_logs(&mut store.logs);
     }
     state.save();
     Some(outcome)
@@ -503,10 +565,7 @@ fn execute_folder_job_inner(state: Arc<AppState>, job_id: &str) -> Option<crate:
             success: outcome.success,
             message: outcome.message.clone(),
         });
-        let len = store.logs.len();
-        if len > 500 {
-            store.logs.drain(0..len - 500);
-        }
+        crate::model::prune_old_logs(&mut store.logs);
     }
     state.save();
     Some(outcome)

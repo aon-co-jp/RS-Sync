@@ -2109,6 +2109,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "flate2",
  "hmac 0.12.1",
  "lettre",
  "poem",

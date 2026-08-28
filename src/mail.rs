@@ -6,7 +6,7 @@
 //! [`open-redmine`]: https://github.com/aon-co-jp/open-redmine
 
 use lettre::message::header::ContentType;
-use lettre::message::{MultiPart, SinglePart};
+use lettre::message::{Attachment, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};
 
@@ -135,6 +135,42 @@ pub fn send_notification_sync(config: &SmtpConfig, to: &str, subject: &str, body
     build_and_send(config, to, subject, body)
 }
 
+/// 2026-08-28新設(ユーザー指示「ログの送信依頼は、1週間に一度圧縮して、
+/// 指定したメールアドレスへ送付」): ログ本文(JSON)をgzip圧縮し、
+/// メール添付として送る。添付ファイル名に日付を入れ、いつのログか
+/// (送信時点)が分かるようにする。呼び出し元(`scheduler.rs`)は
+/// `spawn_blocking`の内側で同期的に呼ぶ想定(`send_notification_sync`と
+/// 同じ扱い)。
+pub fn send_compressed_log_email(config: &SmtpConfig, to: &str, logs_json: &str) -> Result<(), MailError> {
+    let compressed = gzip_compress(logs_json.as_bytes()).map_err(|e| MailError::Build(format!("ログの圧縮に失敗しました: {e}")))?;
+    let filename = format!("rs-sync-logs-{}.json.gz", chrono::Utc::now().format("%Y-%m-%d"));
+    let content_type = ContentType::parse("application/gzip").map_err(|e| MailError::Build(format!("{e}")))?;
+    let body_text = "RS-Syncの週次ログ(直近1ヶ月分、gzip圧縮)を添付します。\n\n\
+        Attached is RS-Sync's weekly log export (most recent 1 month, gzip-compressed)."
+        .to_string();
+
+    let email = Message::builder()
+        .from(config.from.parse().map_err(|e| MailError::Build(format!("{e}")))?)
+        .to(to.parse().map_err(|e| MailError::Build(format!("{e}")))?)
+        .subject("RS-Sync 週次ログ / weekly log export")
+        .multipart(
+            MultiPart::mixed()
+                .singlepart(SinglePart::builder().header(ContentType::TEXT_PLAIN).body(body_text))
+                .singlepart(Attachment::new(filename).body(compressed, content_type)),
+        )
+        .map_err(|e| MailError::Build(format!("{e}")))?;
+    send_message(config, &email)
+}
+
+fn gzip_compress(data: &[u8]) -> std::io::Result<Vec<u8>> {
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(data)?;
+    encoder.finish()
+}
+
 pub async fn send_otp(config: SmtpConfig, to: String, code: String) -> Result<(), MailError> {
     tokio::task::spawn_blocking(move || {
         let email = build_otp_message(&config, &to, &code)?;
@@ -213,6 +249,45 @@ mod tests {
         // により長い行は"=\n"で折り返されるため、折り返され得る"px"
         // までは厳密一致せず、数値部分までの一致で確認する。
         assert!(raw.contains("font-size:40"), "the code must be rendered at a visibly larger font size than the ~15px body text: {raw}");
+    }
+
+    #[test]
+    fn gzip_compress_round_trips_via_flate2_decoder() {
+        let original = b"{\"logs\": [\"a\", \"b\", \"c\"]}";
+        let compressed = gzip_compress(original).expect("compression should succeed");
+        assert_ne!(compressed, original, "compressed bytes should differ from the input");
+        use flate2::read::GzDecoder;
+        use std::io::Read;
+        let mut decoder = GzDecoder::new(&compressed[..]);
+        let mut decompressed = Vec::new();
+        decoder.read_to_end(&mut decompressed).expect("decompression should succeed");
+        assert_eq!(decompressed, original);
+    }
+
+    #[test]
+    fn send_compressed_log_email_builds_a_gzip_attachment_with_a_dated_filename() {
+        let config = sample_config();
+        // send_message自体(実SMTP接続)はこのテストでは呼ばない
+        // (実SMTP資格情報が無い環境のため、既存のbuild_message系テストと
+        // 同じ制約)。メッセージの組み立てまでを確認するため、send_message
+        // を経由しない構築ロジックだけを別途再現して検証する。
+        let compressed = gzip_compress(b"[]").unwrap();
+        let filename = format!("rs-sync-logs-{}.json.gz", chrono::Utc::now().format("%Y-%m-%d"));
+        let content_type = ContentType::parse("application/gzip").unwrap();
+        let email = Message::builder()
+            .from(config.from.parse().unwrap())
+            .to("someone@example.test".parse().unwrap())
+            .subject("RS-Sync 週次ログ / weekly log export")
+            .multipart(
+                MultiPart::mixed()
+                    .singlepart(SinglePart::builder().header(ContentType::TEXT_PLAIN).body("body".to_string()))
+                    .singlepart(Attachment::new(filename.clone()).body(compressed, content_type)),
+            )
+            .unwrap();
+        let raw = String::from_utf8(email.formatted()).unwrap();
+        assert!(raw.contains("multipart/mixed"));
+        assert!(raw.contains(&filename), "attachment filename should include today's date: {raw}");
+        assert!(raw.contains("application/gzip"));
     }
 
     #[test]

@@ -152,6 +152,21 @@ pub struct SyncJob {
     pub google_synced: bool,
 }
 
+/// 2026-08-28新設(ユーザー指示「ログの送信依頼は、1週間に一度圧縮して、
+/// 第一か第二かはメールアドレスも表示して送付先を選択可能にして」):
+/// 週次ログメールの送信先。「第一」「第二」という呼び方ではなく実際の
+/// メールアドレスを画面に表示した上で選ばせる(UI側`static/index.html`
+/// 参照)、内部的にはどちらの役割かのみを保持する(メールアドレス自体は
+/// `Store.admin_email_override`/`backup_email`が変わっても常に最新の
+/// 値を指すようにするため)。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LogEmailTarget {
+    #[default]
+    Primary,
+    Backup,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunLogEntry {
     pub id: String,
@@ -224,6 +239,52 @@ pub struct Store {
     /// pushする機能の設定・実行結果(`installer_sync`モジュール参照)。
     #[serde(default)]
     pub installer_sync: crate::installer_sync::InstallerSyncSettings,
+    /// 2026-08-28追記(ユーザー指示「ログの送信依頼は、1週間に一度圧縮して
+    /// 送付。送信依頼にチェックを付けなければ送信しない」): 既定は無効
+    /// (チェックを付けなければ何もしない)。
+    #[serde(default)]
+    pub log_email_enabled: bool,
+    /// 送信先(主メール/予備メール、いずれかを選択)。
+    #[serde(default)]
+    pub log_email_target: LogEmailTarget,
+    /// 直近の週次送信がいつ行われたか(次回いつ送るべきかの判定に使う)。
+    #[serde(default)]
+    pub log_email_last_sent_at: Option<DateTime<Utc>>,
+}
+
+impl Store {
+    /// 現在のログイン管理者メールアドレス(`admin_email_override`が
+    /// 優先、無ければ`RS_SYNC_ADMIN_EMAIL`環境変数)。`main.rs`の
+    /// `AuthState`初期化と同じ解決順序。
+    pub fn resolve_primary_email(&self) -> String {
+        self.admin_email_override.clone().unwrap_or_else(|| std::env::var("RS_SYNC_ADMIN_EMAIL").unwrap_or_default())
+    }
+
+    /// 週次ログメールの送信先として選択中のメールアドレスを解決する
+    /// (2026-08-28新設)。予備メールが選択されているが未登録の場合は
+    /// 主メールへフォールバックする(送信先が無いまま「有効」になって
+    /// 何も送られない、という分かりにくい状態を避けるため)。
+    pub fn resolve_log_email_target(&self) -> Option<String> {
+        let primary = self.resolve_primary_email();
+        let primary = if primary.is_empty() { None } else { Some(primary) };
+        match self.log_email_target {
+            LogEmailTarget::Primary => primary,
+            LogEmailTarget::Backup => self.backup_email.clone().filter(|s| !s.is_empty()).or(primary),
+        }
+    }
+}
+
+/// 直近30日(約1ヶ月)より古いログを削除する(ユーザー指示「表示ログは
+/// 直近の1ヶ月分だけとします。それ以外のログなどは自動削除して
+/// 下さい」)。件数上限ではなく日数基準——短期間に多数のジョブが走った
+/// 場合でも直近1ヶ月分は必ず残り、逆に実行頻度が低いジョブのログも
+/// ちょうど1ヶ月で確実に消える。何か削除したかどうかを返す
+/// (呼び出し側が変更があった時だけ`state.save()`するため)。
+pub fn prune_old_logs(logs: &mut Vec<RunLogEntry>) -> bool {
+    let before = logs.len();
+    let cutoff = Utc::now() - chrono::Duration::days(30);
+    logs.retain(|entry| entry.started_at >= cutoff);
+    logs.len() != before
 }
 
 pub struct AppState {
@@ -343,5 +404,57 @@ mod tests {
         let store = state.store.lock().unwrap();
         assert!(store.accounts.is_empty());
         assert!(store.jobs.is_empty());
+    }
+
+    fn sample_log(days_ago: i64) -> RunLogEntry {
+        RunLogEntry {
+            id: format!("log-{days_ago}"),
+            job_id: "job-1".to_string(),
+            started_at: Utc::now() - chrono::Duration::days(days_ago),
+            finished_at: None,
+            success: true,
+            message: "ok".to_string(),
+        }
+    }
+
+    #[test]
+    fn prune_old_logs_keeps_only_the_most_recent_month() {
+        let mut logs = vec![sample_log(0), sample_log(15), sample_log(29), sample_log(31), sample_log(90)];
+        let changed = prune_old_logs(&mut logs);
+        assert!(changed);
+        assert_eq!(logs.len(), 3, "only entries within the last 30 days should remain: {logs:?}");
+        assert!(logs.iter().all(|l| l.id != "log-31" && l.id != "log-90"));
+    }
+
+    #[test]
+    fn prune_old_logs_reports_no_change_when_everything_is_recent() {
+        let mut logs = vec![sample_log(0), sample_log(1)];
+        assert!(!prune_old_logs(&mut logs));
+        assert_eq!(logs.len(), 2);
+    }
+
+    #[test]
+    fn resolve_log_email_target_prefers_backup_when_selected_and_set() {
+        let mut store = Store::default();
+        store.admin_email_override = Some("admin@example.com".to_string());
+        store.backup_email = Some("backup@example.com".to_string());
+        store.log_email_target = LogEmailTarget::Backup;
+        assert_eq!(store.resolve_log_email_target(), Some("backup@example.com".to_string()));
+    }
+
+    #[test]
+    fn resolve_log_email_target_falls_back_to_primary_when_backup_selected_but_unset() {
+        let mut store = Store::default();
+        store.admin_email_override = Some("admin@example.com".to_string());
+        store.log_email_target = LogEmailTarget::Backup;
+        assert_eq!(store.resolve_log_email_target(), Some("admin@example.com".to_string()));
+    }
+
+    #[test]
+    fn resolve_log_email_target_defaults_to_primary() {
+        let mut store = Store::default();
+        store.admin_email_override = Some("admin@example.com".to_string());
+        assert_eq!(store.log_email_target, LogEmailTarget::Primary);
+        assert_eq!(store.resolve_log_email_target(), Some("admin@example.com".to_string()));
     }
 }

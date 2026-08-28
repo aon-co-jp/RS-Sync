@@ -608,6 +608,41 @@ fn list_logs(state: Data<&Arc<AppState>>) -> Json<Vec<model::RunLogEntry>> {
     Json(logs)
 }
 
+/// 2026-08-28新設(ユーザー指示「ログの送信依頼は、1週間に一度圧縮して、
+/// 第一か第二かはメールアドレスも表示して送付先を選択可能にして」):
+/// 「第一」「第二」というラベルだけでは実際どのメールアドレスに送られるか
+/// 分からないため、両方の実際のメールアドレス(未登録ならnull)を
+/// レスポンスへ含める——UI側が選択肢として実アドレスを表示するために使う。
+#[handler]
+fn get_log_email_settings(state: Data<&Arc<AppState>>) -> Json<serde_json::Value> {
+    let store = state.store.lock().unwrap();
+    let primary_email = store.resolve_primary_email();
+    Json(serde_json::json!({
+        "enabled": store.log_email_enabled,
+        "target": store.log_email_target,
+        "primary_email": if primary_email.is_empty() { None } else { Some(primary_email) },
+        "backup_email": store.backup_email,
+        "last_sent_at": store.log_email_last_sent_at,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+struct UpdateLogEmailSettingsReq {
+    enabled: bool,
+    target: model::LogEmailTarget,
+}
+
+#[handler]
+fn update_log_email_settings(state: Data<&Arc<AppState>>, Json(req): Json<UpdateLogEmailSettingsReq>) -> Response {
+    {
+        let mut store = state.store.lock().unwrap();
+        store.log_email_enabled = req.enabled;
+        store.log_email_target = req.target;
+    }
+    state.save();
+    json_ok(&serde_json::json!({"ok": true}))
+}
+
 // ---------------- フォルダ同期(gitホスティング非依存、SFTP/ローカル) ----------------
 
 #[handler]
@@ -1208,6 +1243,7 @@ fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::End
         .at("/jobs/:id/run", post(run_job_now))
         .at("/jobs/:id/resolve/:repo", post(resolve_conflict))
         .at("/logs", get(list_logs))
+        .at("/log-email", get(get_log_email_settings).put(update_log_email_settings))
         .at("/folder-endpoints", get(list_folder_endpoints).post(create_folder_endpoint))
         .at("/folder-endpoints/:id", poem::delete(delete_folder_endpoint).put(update_folder_endpoint_credentials))
         .at("/folder-jobs", get(list_folder_jobs).post(create_folder_job))

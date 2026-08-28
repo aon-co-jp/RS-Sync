@@ -42,6 +42,67 @@ RS-Git/RPoem等と同じ方針: `poem`クレートを直接利用する単純な
   配下にマウントされても壊れないようにするため(open-gitea(現RS-Git)の`/rgit`デプロイ
   で絶対パスfetchが壊れた教訓を踏襲)。
 
+## HANDOFF追記(2026-08-28続き) ログ保持を件数上限→日数基準(直近1ヶ月)へ変更+週次ログメール送信(オプトイン)を新設
+
+ユーザー指示「ログの送信依頼は、1週間に一度圧縮して、第一e-mailに送付。
+第一か第二かはメールアドレスも表示して送付先を選択可能に。ログは送信
+依頼にチェックを付けなければ送信しない。表示ログは直近の1ヶ月分だけ、
+それ以外は自動削除して」への対応。
+
+1. **ログ保持の変更(件数上限500件→日数基準30日)**: `src/model.rs`に
+   `prune_old_logs(logs: &mut Vec<RunLogEntry>) -> bool`を新設
+   (`started_at`が30日より古いものを削除、削除が発生したかを返す)。
+   `scheduler.rs`の`execute_job_inner`/`execute_folder_job_inner`内の
+   旧`drain(0..len-500)`ロジックをこちらへ置き換え、さらに毎tick
+   (1分ごと)でもチェックする(ジョブが実行されない期間が続いても
+   時間経過だけで古いログが確実に消えるようにするため)。
+2. **`LogEmailTarget`(Primary/Backup)+`Store`への3フィールド追加**
+   (`log_email_enabled`・`log_email_target`・`log_email_last_sent_at`)。
+   `Store::resolve_primary_email()`/`resolve_log_email_target()`を新設
+   ——「第一」「第二」という抽象的なラベルではなく、実際のメール
+   アドレスをUIへ渡すための解決ロジック(予備メール選択時に未登録なら
+   主メールへフォールバック)。
+3. **`src/mail.rs`に`send_compressed_log_email()`を新設**: ログ
+   (JSON)をgzip圧縮し(`flate2`crate新規依存、pure Rust)、日付入り
+   ファイル名(`rs-sync-logs-YYYY-MM-DD.json.gz`)の添付ファイルとして
+   `multipart/mixed`メールで送る。
+4. **`scheduler.rs`に`maybe_send_weekly_log_email()`を新設**: 毎tickで
+   (a)`log_email_enabled`が有効か、(b)前回送信から7日以上経過したか、
+   (c)送信先メールアドレスが解決できるか、(d)SMTPが設定されているか、
+   を順にチェックし、全て満たせば送信して`log_email_last_sent_at`を
+   更新する。いずれか未達の場合は警告ログのみを出し**サーバーは継続
+   稼働する**(完全にオプトインの補助機能が原因で本体機能を止めては
+   ならないため)。
+5. **`GET/PUT /api/log-email`(管理者ログイン必須)を新設**: GETは
+   `enabled`/`target`/`primary_email`/`backup_email`(実際のアドレス、
+   未登録ならnull)/`last_sent_at`を返す——UI側がプルダウンに「第一
+   メール(実際のアドレス)」「第二メール(実際のアドレス、未登録なら
+   選択不可)」と表示するために使う。
+6. **`static/index.html`**: 実行ログ見出しの直下に「表示されるログは
+   直近1ヶ月分のみです」という保持ポリシーの明示、週次メール送信の
+   チェックボックス+送信先プルダウン(実アドレス表示)+保存ボタン+
+   前回送信日時の表示を追加。
+7. **検証(実測)**: `cargo build`/`cargo test --lib`**83件全green**
+   (新規10件: `model::tests`の`prune_old_logs_*`/`resolve_log_email_
+   target_*`4件、`mail::tests`の`gzip_compress_round_trips_*`/
+   `send_compressed_log_email_builds_*`2件、既存73件〈直前のGoogle
+   資格情報エントリ分含む〉から回帰なし)。実際にサーバーを起動し、
+   curlで(a)`GET/PUT /api/log-email`の有効化・送信先切替・予備メール
+   登録後の解決結果を確認、(b)実ブラウザ(Claude Browser)で
+   チェックボックス・プルダウン(実アドレス付き)が正しく描画され、
+   保存ボタンから実際にサーバーへ反映されることを確認、(c)
+   **1分間隔のスケジューラtickを実際に1回待って**、送信先未登録の
+   状態でも「no destination email is resolvable」という警告ログのみで
+   サーバーが**クラッシュせず稼働を継続する**ことを確認した(型
+   チェック・ビルド成功だけで完了と報告しない方針の徹底)。コンソール
+   エラー無し。
+8. **正直な開示・未実施**: 実SMTPサーバーが無い環境のため、実際に
+   メールが届くところまでのフルE2E(gzip添付ファイルが実際に受信
+   できること・実際に7日間隔で送られること)は未検証(既存のOTP
+   メール等と同じ、この開発環境固有の制約)。
+- 次にすべきこと: 実SMTP環境での週次ログメールのフルE2E確認
+  (ユーザー自身の受信確認が必要)。
+
 ## HANDOFF追記(2026-08-28) Google連携の資格情報を「管理者へ連絡→VPS環境変数」から「ログイン後のフォームに直接入力」へ変更
 
 ユーザー指示「発行されたクライアントID/クライアントシークレットは、

@@ -396,6 +396,17 @@ a{color:#fff}
 <p id="scheduler-health" class="hint">-</p>
 
 <h2 data-i18n="logsH">実行ログ</h2>
+<p class="hint" data-i18n="logsRetentionHint">表示されるログは直近1ヶ月分のみです。それより古いログは自動的に削除されます。</p>
+<div>
+  <label class="bright"><input type="checkbox" id="log-email-enabled"> <span data-i18n="logEmailEnabledLabel">週に1回、ログを圧縮してメールで送る</span></label>
+  <div id="log-email-target-row">
+    <label class="bright" for="log-email-target" data-i18n="logEmailTargetLabel">送信先</label>
+    <select id="log-email-target"></select>
+  </div>
+  <div><button type="button" id="log-email-save-btn" data-i18n="save">保存</button></div>
+  <p id="log-email-result" class="hint"></p>
+  <p id="log-email-last-sent" class="hint"></p>
+</div>
 <div id="logs"></div>
 
 </div>
@@ -455,6 +466,14 @@ const dict = {
    quickCreate:"この設定でまとめて作成",
    everyHoursLabel:"(補足)代わりに「何時間ごと」で指定したい場合(上の分指定と併用可、両方空欄なら自動実行しない)",
    logsH:"実行ログ", run:"今すぐ同期", del:"削除", resolve:"解決済みにする",
+   logsRetentionHint:"表示されるログは直近1ヶ月分のみです。それより古いログは自動的に削除されます。",
+   logEmailEnabledLabel:"週に1回、ログを圧縮してメールで送る",
+   logEmailTargetLabel:"送信先",
+   logEmailPrimaryOption:"第一メール",
+   logEmailBackupOption:"第二メール(予備)",
+   logEmailNotRegistered:"(未登録)",
+   logEmailLastSentNever:"まだ送信していません。",
+   logEmailLastSentPrefix:"前回送信: ",
    sameAccountWarning:"⚠ ソースと宛先が同じアカウントです(意図した設定か確認してください)",
    schedulerHealthH:"スケジューラの稼働状況", schedulerHealthy:"正常稼働中", schedulerUnhealthy:"⚠ 停止している可能性(3分以上無応答)", schedulerHealthUnknown:"確認できませんでした",
    folderH:"フォルダ同期(GitHub等とは別、レンタルサーバー・VPS・ローカルドライブ・スマホ・NAS間のファイルコピー)",
@@ -542,6 +561,14 @@ const dict = {
    quickCreate:"Create this setup",
    everyHoursLabel:"(Alternative) Specify \"every N hours\" instead (can be combined with the minutes field above; empty on both = no automatic runs)",
    logsH:"Run log", run:"Sync now", del:"Delete", resolve:"Mark resolved",
+   logsRetentionHint:"Only the most recent 1 month of logs is shown. Anything older is deleted automatically.",
+   logEmailEnabledLabel:"Email a compressed log export once a week",
+   logEmailTargetLabel:"Send to",
+   logEmailPrimaryOption:"Primary email",
+   logEmailBackupOption:"Backup email",
+   logEmailNotRegistered:"(not registered)",
+   logEmailLastSentNever:"Never sent yet.",
+   logEmailLastSentPrefix:"Last sent: ",
    sameAccountWarning:"⚠ Source and destination are the same account (check this is intentional)",
    schedulerHealthH:"Scheduler status", schedulerHealthy:"Running normally", schedulerUnhealthy:"⚠ May be stuck (no heartbeat for 3+ min)", schedulerHealthUnknown:"Could not check",
    folderH:"Folder sync (separate from GitHub etc. — plain file copy between rented servers, VPS, local drives, phones, NAS)",
@@ -755,6 +782,18 @@ document.getElementById("settings-admin-phone-save").onclick = async ()=>{
     await api("api/auth/admin-phone", {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({admin_phone})});
     resultEl.textContent = dict[lang].settingsSaved;
     renderAccountSettings();
+  } catch(e) { resultEl.textContent = dict[lang].settingsError + String(e); }
+};
+
+document.getElementById("log-email-save-btn").onclick = async ()=>{
+  const resultEl = document.getElementById("log-email-result");
+  const enabled = document.getElementById("log-email-enabled").checked;
+  const target = document.getElementById("log-email-target").value;
+  try {
+    const body = await api("api/log-email", {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({enabled, target})});
+    if (body && body.error) { resultEl.textContent = body.error; return; }
+    resultEl.textContent = dict[lang].settingsSaved;
+    await renderLogEmailSettings();
   } catch(e) { resultEl.textContent = dict[lang].settingsError + String(e); }
 };
 
@@ -1494,6 +1533,26 @@ async function renderLogs(){
   document.getElementById("logs").innerHTML = logs.map(l=>`<pre>[${l.started_at}] ${l.success?"OK":"ERR"}\n${l.message}</pre>`).join("");
 }
 
+// 2026-08-28新設(ユーザー指示「ログの送信依頼は、1週間に一度圧縮して、
+// 第一か第二かはメールアドレスも表示して送付先を選択可能にして。ログは
+// 送信依頼にチェックを付けなければ送信致しません」)。「第一」「第二」
+// だけでは実際どこに送られるか分からないため、選択肢には実際の
+// メールアドレスを表示する(未登録の場合はその旨を表示し選択不可にする)。
+async function renderLogEmailSettings(){
+  try {
+    const s = await api("api/log-email");
+    document.getElementById("log-email-enabled").checked = !!s.enabled;
+    const sel = document.getElementById("log-email-target");
+    const primaryLabel = `${dict[lang].logEmailPrimaryOption} (${s.primary_email || dict[lang].logEmailNotRegistered})`;
+    const backupLabel = `${dict[lang].logEmailBackupOption} (${s.backup_email || dict[lang].logEmailNotRegistered})`;
+    sel.innerHTML = `<option value="primary">${primaryLabel}</option><option value="backup" ${s.backup_email ? "" : "disabled"}>${backupLabel}</option>`;
+    sel.value = s.target === "backup" ? "backup" : "primary";
+    document.getElementById("log-email-last-sent").textContent = s.last_sent_at
+      ? dict[lang].logEmailLastSentPrefix + s.last_sent_at
+      : dict[lang].logEmailLastSentNever;
+  } catch (e) { /* 401 already handled in api() */ }
+}
+
 async function renderSchedulerHealth(){
   // 認証不要のエンドポイント(2026-07-29追記、ハートビート機能)。
   // ログインしていなくても異常を確認できるようにあえて`api()`
@@ -1623,6 +1682,7 @@ async function renderAll(){
     const eps = await renderFolderEndpoints();
     await renderFolderJobs(eps);
     await renderLogs();
+    await renderLogEmailSettings();
     await renderGoogleCalendarStatus();
     await renderAccountSettings();
   } catch(e) { /* 401 already handled in api() */ }
