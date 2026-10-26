@@ -1629,3 +1629,5 @@ HANDOFFエントリを置いてある: [open-redmine](https://github.com/aon-co-
 ロジックを再利用すること(車輪の再発明を避ける)。
 - 次にすべきこと: このリポジトリの`install.sh`/`install.ps1`に上記3
   プロファイルの選択機能を追加する。
+
+- **2026-10-26 公開準備**: 履歴からGitHubトークン文字列を除去(filter-branchで置換、旧履歴は`F:\_anon\backup\RS-Sync-before-token-scrub.bundle`、トークン自体はユーザーが失効済み)、main・v0.1.1を強制push。`docs/github-actions-backup/`(GitHub Actionsだけで GitHub→GitLab を自動バックアップするスクリプトと日英の使い方)とLICENSE(Apache-2.0)を追加。**VPSの`/root/repository/rs-sync`では`git pull`せず**`git fetch`+`git reset --hard origin/main`(旧履歴が戻るため)。

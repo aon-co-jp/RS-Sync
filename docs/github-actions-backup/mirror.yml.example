@@ -1,0 +1,35 @@
+name: Mirror to GitLab
+
+on:
+  schedule:
+    - cron: "0 19 * * *" # 毎日 04:00 JST
+  workflow_dispatch:
+    inputs:
+      only_repos:
+        description: "テスト用: このリポジトリだけ処理(空白区切り、空欄で全件)"
+        required: false
+        default: ""
+
+concurrency:
+  group: gitlab-mirror
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mirror all repositories
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_OWNER: ${{ github.repository_owner }}
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+          GITLAB_NAMESPACE_ID: ${{ vars.GITLAB_NAMESPACE_ID }}
+          GITLAB_NAMESPACE_PATH: ${{ vars.GITLAB_NAMESPACE_PATH }}
+          EXCLUDE_REPOS: ${{ vars.EXCLUDE_REPOS }}
+          ONLY_REPOS: ${{ github.event.inputs.only_repos }}
+        run: bash mirror.sh

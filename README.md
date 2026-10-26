@@ -15,6 +15,11 @@ server, local drive, and NAS — see [`src/folder_sync.rs`](src/folder_sync.rs).
 **Linux**: [rs-sync-linux-x86_64.tar.gz](https://github.com/aon-co-jp/RS-Sync/releases/latest/download/rs-sync-linux-x86_64.tar.gz)
 (includes `install.sh`) — see [all releases](https://github.com/aon-co-jp/RS-Sync/releases).
 
+## GitHub Actions だけで自動バックアップ(GitHub → GitLab) / Backup with GitHub Actions only
+
+VPS やレンタルサーバー以外の GitHub / GitLab のデータは、GitHub Actions で自動バックアップできます。スクリプトと使い方(日本語・英語)は [`docs/github-actions-backup/`](docs/github-actions-backup/README.md)。
+For data on GitHub / GitLab (not on your own server), GitHub Actions can back it up automatically. Scripts and instructions (Japanese and English): [`docs/github-actions-backup/`](docs/github-actions-backup/README.md).
+
 ## What it does (MVP)
 
 - Register **accounts** (source/destination) for a git-hosting provider,
