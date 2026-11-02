@@ -37,8 +37,7 @@ thiserror = "1"
 # pure-Rust実装へ置き換え(Androidクロスビルド阻害の解消、
 # `src/folder_sync.rs`のモジュールdoc参照)。open-web-server側`sftp.rs`が
 # 既に実機検証済みのバージョンに揃える。
-russh = "0.45"
-russh-keys = "0.45"
+russh = { version = "0.63", default-features = false, features = ["ring", "rsa"] }
 russh-sftp = "2"
 async-trait = "0.1"
 walkdir = "2"

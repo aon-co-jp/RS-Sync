@@ -189,11 +189,10 @@ impl FolderBackend for LocalBackend {
 /// 検証を追加する余地がある)。
 struct TrustAnyServerKey;
 
-#[async_trait::async_trait]
 impl russh::client::Handler for TrustAnyServerKey {
     type Error = russh::Error;
 
-    async fn check_server_key(&mut self, _server_public_key: &russh_keys::key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(&mut self, _server_public_key: &russh::keys::PublicKeyOrCertificate) -> Result<bool, Self::Error> {
         Ok(true)
     }
 }
@@ -234,17 +233,22 @@ impl SftpBackend {
                 .with_context(|| format!("SSH connect to {}:{}", endpoint.host, endpoint.port))?;
 
             let authenticated = if !endpoint.private_key_path.is_empty() {
-                let key_pair = russh_keys::load_secret_key(&endpoint.private_key_path, None)
+                let key_pair = russh::keys::load_secret_key(&endpoint.private_key_path, None)
                     .with_context(|| format!("load SSH private key from {}", endpoint.private_key_path))?;
                 handle
-                    .authenticate_publickey(&endpoint.username, std::sync::Arc::new(key_pair))
+                    .authenticate_publickey(
+                        &endpoint.username,
+                        russh::keys::PrivateKeyWithHashAlg::new(std::sync::Arc::new(key_pair), Some(russh::keys::HashAlg::Sha512)),
+                    )
                     .await
                     .context("ssh pubkey auth request")?
+                    .success()
             } else {
                 handle
                     .authenticate_password(&endpoint.username, &endpoint.password)
                     .await
                     .context("ssh password auth request")?
+                    .success()
             };
             if !authenticated {
                 return Err(anyhow!("SFTP authentication failed for {}@{}", endpoint.username, endpoint.host));
