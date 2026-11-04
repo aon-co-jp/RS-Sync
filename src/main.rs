@@ -1,3 +1,4 @@
+mod connect;
 use rs_sync::auth::{AuthStore, RequestOtpOutcome};
 use rs_sync::mail::{self, SmtpConfig};
 use rs_sync::model::{self, Account, AppState, Direction, Schedule, SyncJob};
@@ -1271,21 +1272,21 @@ fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::End
         .at("/auth/verify-otp", post(verify_otp))
         .at("/auth/logout", post(logout))
         // ユーザー指示「e-mail不明になっても2FAでもログイン可能にして」:
-        // メールOTPを経由しない代替ログイン経路のため、セッション未取得の
-        // 状態から呼べるよう未認証のまま公開する(TOTPコード自体が
-        // 認証情報のため、`RequireAuth`は不要かつ本末転倒になる)。
+        // メールOTPを経由しない代替ログイン経路のため未認証のまま公開する。
         .at("/auth/totp-login", post(totp_login))
-        // GoogleのOAuthリダイレクトはこちらのBearerトークンを運べないため
-        // 未認証のまま公開する(CSRF対策は`state`パラメータの一致のみ)。
-        .at("/auth/google/callback", get(google_calendar_callback))
         .nest("/", protected)
-        .with(ReadOnlyGuard { read_only: auth_state.read_only });
+        .with(ReadOnlyGuard { read_only: auth_state.read_only })
+        .data(state.clone())
+        .data(auth_state.clone());
 
+    // 公開される入口はConnectの単純呼び出し(POST /rs_sync.v1.Sync/<Method>)のみ。
+    // 例外: GoogleのOAuthリダイレクト(規格により固定のGET)、ヘルスチェック、静的画面。
     Route::new()
         .at("/", get(index))
         .at("/healthz", get(healthz))
         .at("/healthz/scheduler", get(healthz_scheduler))
-        .nest("/api", api)
+        .at("/api/auth/google/callback", get(google_calendar_callback))
+        .at("/rs_sync.v1.Sync/:method", post(connect::ConnectEndpoint { inner: api }))
         .data(state)
         .data(auth_state)
 }
@@ -1379,10 +1380,10 @@ mod tests {
         let app = build_app(state, auth_state);
         let client = TestClient::new(app);
 
-        let resp = client.get("/api/accounts").send().await;
+        let resp = client.post("/rs_sync.v1.Sync/ListAccounts").send().await;
         resp.assert_status(StatusCode::UNAUTHORIZED);
 
-        let resp = client.post("/api/accounts").body_json(&serde_json::json!({
+        let resp = client.post("/rs_sync.v1.Sync/CreateAccount").body_json(&serde_json::json!({
             "id": "", "name": "x", "provider": "GitHub", "api_base": "https://api.github.com",
             "git_base": "https://github.com", "owner": "me", "token": "secret-token"
         })).send().await;
@@ -1398,7 +1399,7 @@ mod tests {
         let client = TestClient::new(app);
 
         let resp = client
-            .post("/api/accounts")
+            .post("/rs_sync.v1.Sync/CreateAccount")
             .header("Authorization", format!("Bearer {token}"))
             .body_json(&serde_json::json!({
                 "id": "", "name": "x", "provider": "GitHub", "api_base": "https://api.github.com",
@@ -1410,7 +1411,7 @@ mod tests {
         let body_text = resp.0.into_body().into_string().await.unwrap();
         assert!(!body_text.contains("super-secret-pat"), "raw token leaked in create response: {body_text}");
 
-        let resp = client.get("/api/accounts").header("Authorization", format!("Bearer {token}")).send().await;
+        let resp = client.post("/rs_sync.v1.Sync/ListAccounts").header("Authorization", format!("Bearer {token}")).send().await;
         resp.assert_status_is_ok();
         let body_text = resp.0.into_body().into_string().await.unwrap();
         assert!(!body_text.contains("super-secret-pat"), "raw token leaked in list response: {body_text}");
@@ -1428,7 +1429,7 @@ mod tests {
         let client = TestClient::new(app);
 
         let create_resp = client
-            .post("/api/accounts")
+            .post("/rs_sync.v1.Sync/CreateAccount")
             .header("Authorization", format!("Bearer {token}"))
             .body_json(&serde_json::json!({
                 "id": "", "name": "master", "provider": "GitHub", "api_base": "https://api.github.com",
@@ -1444,24 +1445,24 @@ mod tests {
         assert_eq!(created["token_set"], serde_json::json!(false));
 
         let update_resp = client
-            .put(format!("/api/accounts/{id}"))
+            .post("/rs_sync.v1.Sync/UpdateAccountToken")
             .header("Authorization", format!("Bearer {token}"))
-            .body_json(&serde_json::json!({"token": "ghp_newtoken"}))
+            .body_json(&serde_json::json!({"id": id,"token": "ghp_newtoken"}))
             .send()
             .await;
         update_resp.assert_status_is_ok();
         let updated_body = update_resp.0.into_body().into_string().await.unwrap();
         assert!(!updated_body.contains("ghp_newtoken"), "raw token leaked in update response: {updated_body}");
 
-        let list_resp = client.get("/api/accounts").header("Authorization", format!("Bearer {token}")).send().await;
+        let list_resp = client.post("/rs_sync.v1.Sync/ListAccounts").header("Authorization", format!("Bearer {token}")).send().await;
         let list: serde_json::Value = list_resp.0.into_body().into_json().await.unwrap();
         assert_eq!(list[0]["token_set"], serde_json::json!(true));
 
         // 存在しないIDへの更新は404。
         let missing_resp = client
-            .put("/api/accounts/does-not-exist")
+            .post("/rs_sync.v1.Sync/UpdateAccountToken")
             .header("Authorization", format!("Bearer {token}"))
-            .body_json(&serde_json::json!({"token": "x"}))
+            .body_json(&serde_json::json!({"id": "does-not-exist","token": "x"}))
             .send()
             .await;
         missing_resp.assert_status(StatusCode::NOT_FOUND);
@@ -1482,7 +1483,7 @@ mod tests {
         let client = TestClient::new(app);
 
         let create_resp = client
-            .post("/api/accounts")
+            .post("/rs_sync.v1.Sync/CreateAccount")
             .header("Authorization", format!("Bearer {token}"))
             .body_json(&serde_json::json!({
                 "id": "", "name": "master", "provider": "GitHub", "api_base": "https://api.github.com",
@@ -1501,9 +1502,9 @@ mod tests {
         }
 
         let update_resp = client
-            .put(format!("/api/accounts/{id}"))
+            .post("/rs_sync.v1.Sync/UpdateAccountToken")
             .header("Authorization", format!("Bearer {token}"))
-            .body_json(&serde_json::json!({"token": "\tghp_anothertoken  "}))
+            .body_json(&serde_json::json!({"id": id,"token": "\tghp_anothertoken  "}))
             .send()
             .await;
         update_resp.assert_status_is_ok();
@@ -1527,7 +1528,7 @@ mod tests {
         let client = TestClient::new(app);
 
         let create_resp = client
-            .post("/api/folder-endpoints")
+            .post("/rs_sync.v1.Sync/CreateFolderEndpoint")
             .header("Authorization", format!("Bearer {token}"))
             .body_json(&serde_json::json!({
                 "id":"", "name":"nas", "kind":"Sftp", "path":"/backups",
@@ -1540,14 +1541,14 @@ mod tests {
         let created_body = create_resp.0.into_body().into_string().await.unwrap();
         assert!(!created_body.contains("super-secret-password"), "raw password leaked: {created_body}");
 
-        let list_resp = client.get("/api/folder-endpoints").header("Authorization", format!("Bearer {token}")).send().await;
+        let list_resp = client.post("/rs_sync.v1.Sync/ListFolderEndpoints").header("Authorization", format!("Bearer {token}")).send().await;
         list_resp.assert_status_is_ok();
         let list_body = list_resp.0.into_body().into_string().await.unwrap();
         assert!(!list_body.contains("super-secret-password"), "raw password leaked in list: {list_body}");
         assert!(list_body.contains("\"credentials_set\":true"));
 
         // 未ログインでは401。
-        let unauth = client.get("/api/folder-endpoints").send().await;
+        let unauth = client.post("/rs_sync.v1.Sync/ListFolderEndpoints").send().await;
         unauth.assert_status(StatusCode::UNAUTHORIZED);
     }
 
@@ -1578,7 +1579,7 @@ mod tests {
         let app = build_app(state, auth_state);
         let client = TestClient::new(app);
 
-        let resp = client.get("/api/accounts").send().await;
+        let resp = client.post("/rs_sync.v1.Sync/ListAccounts").send().await;
         resp.assert_status_is_ok();
     }
 
@@ -1593,14 +1594,14 @@ mod tests {
         let client = TestClient::new(app);
 
         let resp = client
-            .post("/api/auth/verify-otp")
+            .post("/rs_sync.v1.Sync/VerifyOtp")
             .body_json(&serde_json::json!({"email": "admin@example.com", "code": code}))
             .send()
             .await;
         resp.assert_status_is_ok();
 
         let resp = client
-            .post("/api/auth/verify-otp")
+            .post("/rs_sync.v1.Sync/VerifyOtp")
             .body_json(&serde_json::json!({"email": "admin@example.com", "code": "000000"}))
             .send()
             .await;
@@ -1620,7 +1621,7 @@ mod tests {
         let auth = format!("Bearer {token}");
 
         let src_resp = client
-            .post("/api/folder-endpoints")
+            .post("/rs_sync.v1.Sync/CreateFolderEndpoint")
             .header("Authorization", &auth)
             .body_json(&serde_json::json!({
                 "id": "", "name": "src", "kind": "Local", "path": "/tmp/a",
@@ -1630,7 +1631,7 @@ mod tests {
             .await;
         let src: serde_json::Value = src_resp.0.into_body().into_json().await.unwrap();
         let dst_resp = client
-            .post("/api/folder-endpoints")
+            .post("/rs_sync.v1.Sync/CreateFolderEndpoint")
             .header("Authorization", &auth)
             .body_json(&serde_json::json!({
                 "id": "", "name": "dst", "kind": "Local", "path": "/tmp/b",
@@ -1641,7 +1642,7 @@ mod tests {
         let dst: serde_json::Value = dst_resp.0.into_body().into_json().await.unwrap();
 
         let job_resp = client
-            .post("/api/folder-jobs")
+            .post("/rs_sync.v1.Sync/CreateFolderJob")
             .header("Authorization", &auth)
             .body_json(&serde_json::json!({
                 "id": "", "name": "j", "source_endpoint_id": src["id"], "dest_endpoint_id": dst["id"],
@@ -1654,24 +1655,24 @@ mod tests {
         assert_eq!(job["schedule"]["every_hours"], serde_json::json!(1));
 
         let update_resp = client
-            .put(format!("/api/folder-jobs/{job_id}"))
+            .post("/rs_sync.v1.Sync/UpdateFolderJobSchedule")
             .header("Authorization", &auth)
-            .body_json(&serde_json::json!({
+            .body_json(&serde_json::json!({"id": job_id,
                 "schedule": {"every_hours": null, "days_of_week": [], "hour": null, "minute": null, "realtime_poll_minutes": 15}
             }))
             .send()
             .await;
         update_resp.assert_status_is_ok();
 
-        let list_resp = client.get("/api/folder-jobs").header("Authorization", &auth).send().await;
+        let list_resp = client.post("/rs_sync.v1.Sync/ListFolderJobs").header("Authorization", &auth).send().await;
         let list: serde_json::Value = list_resp.0.into_body().into_json().await.unwrap();
         assert_eq!(list[0]["schedule"]["every_hours"], serde_json::json!(null));
         assert_eq!(list[0]["schedule"]["realtime_poll_minutes"], serde_json::json!(15));
 
         let missing_resp = client
-            .put("/api/folder-jobs/does-not-exist")
+            .post("/rs_sync.v1.Sync/UpdateFolderJobSchedule")
             .header("Authorization", &auth)
-            .body_json(&serde_json::json!({
+            .body_json(&serde_json::json!({"id": "does-not-exist",
                 "schedule": {"every_hours": 1, "days_of_week": [], "hour": null, "minute": null, "realtime_poll_minutes": null}
             }))
             .send()
@@ -1694,7 +1695,7 @@ mod tests {
         let auth = format!("Bearer {token}");
 
         let resp = client
-            .put("/api/auth/backup-email")
+            .post("/rs_sync.v1.Sync/UpdateBackupEmail")
             .header("Authorization", &auth)
             .body_json(&serde_json::json!({"backup_email": "backup@example.com"}))
             .send()
@@ -1704,7 +1705,7 @@ mod tests {
         // 予備メールアドレスでもOTP要求が(SMTP未設定のため503にはなるが
         // "登録されていない連絡先"の403にはならない、という形で)通る。
         let resp = client
-            .post("/api/auth/request-otp")
+            .post("/rs_sync.v1.Sync/RequestOtp")
             .body_json(&serde_json::json!({"email": "backup@example.com"}))
             .send()
             .await;
@@ -1712,7 +1713,7 @@ mod tests {
 
         // 未登録のメールアドレスは引き続き拒否される。
         let resp = client
-            .post("/api/auth/request-otp")
+            .post("/rs_sync.v1.Sync/RequestOtp")
             .body_json(&serde_json::json!({"email": "someone-else@example.com"}))
             .send()
             .await;
@@ -1733,13 +1734,13 @@ mod tests {
 
         // 有効化前はtotp-loginで拒否される。
         let resp = client
-            .post("/api/auth/totp-login")
+            .post("/rs_sync.v1.Sync/TotpLogin")
             .body_json(&serde_json::json!({"code": "000000"}))
             .send()
             .await;
         resp.assert_status(StatusCode::FORBIDDEN);
 
-        let setup_resp = client.post("/api/auth/totp/setup").header("Authorization", &auth).send().await;
+        let setup_resp = client.post("/rs_sync.v1.Sync/SetupTotp").header("Authorization", &auth).send().await;
         setup_resp.assert_status_is_ok();
         let setup_body: serde_json::Value = setup_resp.0.into_body().into_json().await.unwrap();
         let secret = setup_body["secret"].as_str().unwrap().to_string();
@@ -1748,14 +1749,14 @@ mod tests {
         let code = rs_sync::totp::code_at(&secret, now).unwrap();
 
         let enable_resp = client
-            .post("/api/auth/totp/enable")
+            .post("/rs_sync.v1.Sync/EnableTotp")
             .header("Authorization", &auth)
             .body_json(&serde_json::json!({"code": code}))
             .send()
             .await;
         enable_resp.assert_status_is_ok();
 
-        let status_resp = client.get("/api/auth/totp/status").header("Authorization", &auth).send().await;
+        let status_resp = client.post("/rs_sync.v1.Sync/GetTotpStatus").header("Authorization", &auth).send().await;
         let status_body: serde_json::Value = status_resp.0.into_body().into_json().await.unwrap();
         assert_eq!(status_body["enabled"], serde_json::json!(true));
 
@@ -1763,7 +1764,7 @@ mod tests {
         let now2 = chrono::Utc::now().timestamp();
         let code2 = rs_sync::totp::code_at(&secret, now2).unwrap();
         let login_resp = client
-            .post("/api/auth/totp-login")
+            .post("/rs_sync.v1.Sync/TotpLogin")
             .body_json(&serde_json::json!({"code": code2}))
             .send()
             .await;
@@ -1772,9 +1773,9 @@ mod tests {
         assert!(login_body["token"].as_str().is_some());
 
         // 無効化後は拒否される。
-        client.post("/api/auth/totp/disable").header("Authorization", &auth).send().await;
+        client.post("/rs_sync.v1.Sync/DisableTotp").header("Authorization", &auth).send().await;
         let login_resp2 = client
-            .post("/api/auth/totp-login")
+            .post("/rs_sync.v1.Sync/TotpLogin")
             .body_json(&serde_json::json!({"code": code2}))
             .send()
             .await;
