@@ -1665,3 +1665,8 @@ HANDOFFエントリを置いてある: [open-redmine](https://github.com/aon-co-
 - **Исключения (интерфейсы, форму которых определяет чужой стандарт, а не наш собственный API)**: ACME, обратные вызовы OAuth/OIDC, вебхуки сторонних сервисов (например, GitHub), проверки работоспособности, раздача статических файлов, OTLP и тому подобное. Такие интерфейсы принимают обычный HTTP, как того требует соответствующий стандарт.
 - Эталонные реализации: `RPoem` (`open_runo.admin.v1.Admin`) и `open-easy-web` (`server/src/connect.rs`, `proto/open_easy_web/admin/v1/admin.proto`).
 - Примечание: соответствует ли код конкретного репозитория этой политике, зависит от самого репозитория. Данный раздел лишь фиксирует политику и не означает, что код уже изменён.
+
+## HANDOFF 2026-11-05 REST全廃→Connect(ブランチ `rest-to-connect`)
+- 公開APIは `POST /rs_sync.v1.Sync/<Method>`(JSON、44メソッド、`id`/`repo`は本文、エラーは`{"code","message"}`、本文はサイズ・深さ・重複キーの上限つき)。実装は`src/connect.rs`、内部ルーターは非公開。旧`/api/*`のRESTは削除。画面(`static/index.html`)は`connectCall`で追従(ブラウザで主要操作・200/404を確認済み)。
+- 例外(規格どおり): `/healthz`、`/healthz/scheduler`、`/`(静的画面)、`/api/auth/google/callback`(GoogleのOAuthリダイレクト)。
+- 未了: `tests/sync_integration.rs`の双方向同期2件が失敗(移行前から失敗かは未確認)、認証あり正常系のcurl確認、VPS反映(WSLでリリースビルド→入れ替え)、mainへのマージ。

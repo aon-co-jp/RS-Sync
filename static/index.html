@@ -630,19 +630,70 @@ let authNotRequired = false;
 async function probeAuthRequirement(){
   if (sessionToken()) return; // 既にログイン済みなら判定不要
   try {
-    const r = await fetch("api/accounts");
+    const r = await rpcFetch("api/accounts");
     authNotRequired = r.ok;
   } catch (e) {
     authNotRequired = false;
   }
 }
 
+// Connect の単純呼び出し(2026-11-04、REST全廃): 画面内の呼び出し表記
+// (動詞+旧パス)を `POST rs_sync.v1.Sync/<Method>`(JSON本文、idは本文)へ変換する。
+const CONNECT_SERVICE = "rs_sync.v1.Sync";
+const CONNECT_TABLE = [
+  ["GET","accounts","ListAccounts"],["POST","accounts","CreateAccount"],
+  ["DELETE","accounts/:id","DeleteAccount"],["PUT","accounts/:id","UpdateAccountToken"],
+  ["GET","jobs","ListJobs"],["POST","jobs","CreateJob"],
+  ["DELETE","jobs/:id","DeleteJob"],["PUT","jobs/:id","UpdateJobSchedule"],
+  ["POST","jobs/:id/run","RunJob"],["POST","jobs/:id/resolve/:repo","ResolveConflict"],
+  ["POST","jobs/:id/sync-google-calendar","SyncJobToGoogleCalendar"],
+  ["GET","logs","ListLogs"],["GET","log-email","GetLogEmailSettings"],["PUT","log-email","UpdateLogEmailSettings"],
+  ["GET","folder-endpoints","ListFolderEndpoints"],["POST","folder-endpoints","CreateFolderEndpoint"],
+  ["DELETE","folder-endpoints/:id","DeleteFolderEndpoint"],["PUT","folder-endpoints/:id","UpdateFolderEndpointCredentials"],
+  ["GET","folder-jobs","ListFolderJobs"],["POST","folder-jobs","CreateFolderJob"],
+  ["DELETE","folder-jobs/:id","DeleteFolderJob"],["PUT","folder-jobs/:id","UpdateFolderJobSchedule"],
+  ["POST","folder-jobs/:id/run","RunFolderJob"],["POST","folder-jobs/:id/sync-google-calendar","SyncFolderJobToGoogleCalendar"],
+  ["GET","google/status","GetGoogleStatus"],["GET","google/login","GetGoogleLoginUrl"],
+  ["GET","google/credentials","GetGoogleCredentials"],["PUT","google/credentials","UpdateGoogleCredentials"],
+  ["GET","auth/admin-email","GetAdminEmail"],["PUT","auth/admin-email","UpdateAdminEmail"],
+  ["GET","auth/backup-email","GetBackupEmail"],["PUT","auth/backup-email","UpdateBackupEmail"],
+  ["GET","auth/admin-phone","GetAdminPhone"],["PUT","auth/admin-phone","UpdateAdminPhone"],
+  ["POST","auth/totp/setup","SetupTotp"],["POST","auth/totp/enable","EnableTotp"],
+  ["POST","auth/totp/disable","DisableTotp"],["GET","auth/totp/status","GetTotpStatus"],
+  ["GET","installer-sync/status","GetInstallerSyncStatus"],["PUT","installer-sync/config","UpdateInstallerSyncConfig"],
+  ["POST","installer-sync/run","RunInstallerSync"],
+  ["POST","auth/request-otp","RequestOtp"],["POST","auth/verify-otp","VerifyOtp"],
+  ["POST","auth/logout","Logout"],["POST","auth/totp-login","TotpLogin"],
+];
+function connectCall(path, opts){
+  const verb = ((opts && opts.method) || "GET").toUpperCase();
+  const segs = path.replace(/^api\//, "").split("/").map(decodeURIComponent);
+  for (const [v, tmpl, name] of CONNECT_TABLE) {
+    const t = tmpl.split("/");
+    if (v !== verb || t.length !== segs.length) continue;
+    const params = {};
+    let ok = true;
+    t.forEach((seg, i) => {
+      if (seg.startsWith(":")) params[seg.slice(1)] = segs[i];
+      else if (seg !== segs[i]) ok = false;
+    });
+    if (!ok) continue;
+    const body = Object.assign({}, opts && opts.body ? JSON.parse(opts.body) : {}, params);
+    return { url: CONNECT_SERVICE + "/" + name, body };
+  }
+  throw new Error("unknown call: " + verb + " " + path);
+}
+async function rpcFetch(path, opts){
+  const c = connectCall(path, opts);
+  const headers = Object.assign({}, (opts && opts.headers) || {}, {"Content-Type": "application/json"});
+  return fetch(c.url, {method: "POST", headers, body: JSON.stringify(c.body)});
+}
 async function api(path, opts){
   opts = opts || {};
   opts.headers = Object.assign({}, opts.headers || {});
   const token = sessionToken();
   if (token) opts.headers["Authorization"] = "Bearer " + token;
-  const r = await fetch(path, opts);
+  const r = await rpcFetch(path, opts);
   if (r.status === 401) {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(EMAIL_KEY);
@@ -665,9 +716,9 @@ document.getElementById("login-request-otp").onclick = async ()=>{
   const email = document.getElementById("login-email").value.trim();
   const resultEl = document.getElementById("login-result");
   try {
-    const r = await fetch("api/auth/request-otp", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({email})});
+    const r = await rpcFetch("api/auth/request-otp", {method:"POST", body: JSON.stringify({email})});
     const body = await r.json();
-    resultEl.textContent = body.message_ja || body.message_en || body.error || (r.ok ? "OK" : "error");
+    resultEl.textContent = body.message_ja || body.message_en || body.error || body.message || (r.ok ? "OK" : "error");
   } catch(e) { resultEl.textContent = String(e); }
 };
 
@@ -676,7 +727,7 @@ document.getElementById("login-verify-otp").onclick = async ()=>{
   const code = document.getElementById("login-code").value.trim();
   const resultEl = document.getElementById("login-result");
   try {
-    const r = await fetch("api/auth/verify-otp", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({email, code})});
+    const r = await rpcFetch("api/auth/verify-otp", {method:"POST", body: JSON.stringify({email, code})});
     const body = await r.json();
     if (r.ok && body.token) {
       localStorage.setItem(TOKEN_KEY, body.token);
@@ -685,7 +736,7 @@ document.getElementById("login-verify-otp").onclick = async ()=>{
       syncAuthVisibility();
       renderAll();
     } else {
-      resultEl.textContent = body.error || "login failed";
+      resultEl.textContent = body.error || body.message || "login failed";
     }
   } catch(e) { resultEl.textContent = String(e); }
 };
@@ -703,7 +754,7 @@ document.getElementById("totp-login-btn").onclick = async ()=>{
   const code = document.getElementById("totp-login-code").value.trim();
   const resultEl = document.getElementById("totp-login-result");
   try {
-    const r = await fetch("api/auth/totp-login", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({code})});
+    const r = await rpcFetch("api/auth/totp-login", {method:"POST", body: JSON.stringify({code})});
     const body = await r.json();
     if (r.ok && body.token) {
       localStorage.setItem(TOKEN_KEY, body.token);
@@ -714,7 +765,7 @@ document.getElementById("totp-login-btn").onclick = async ()=>{
       renderAll();
       refreshAdminEmailLabel();
     } else {
-      resultEl.textContent = body.error || "login failed";
+      resultEl.textContent = body.error || body.message || "login failed";
     }
   } catch(e) { resultEl.textContent = String(e); }
 };
@@ -791,7 +842,7 @@ document.getElementById("log-email-save-btn").onclick = async ()=>{
   const target = document.getElementById("log-email-target").value;
   try {
     const body = await api("api/log-email", {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({enabled, target})});
-    if (body && body.error) { resultEl.textContent = body.error; return; }
+    if (body && (body.error || body.code)) { resultEl.textContent = body.error || body.message; return; }
     resultEl.textContent = dict[lang].settingsSaved;
     await renderLogEmailSettings();
   } catch(e) { resultEl.textContent = dict[lang].settingsError + String(e); }
@@ -807,7 +858,7 @@ document.getElementById("google-creds-save-btn").onclick = async ()=>{
   if (!client_id) { resultEl.textContent = dict[lang].googleCredsNeedBoth; return; }
   try {
     const body = await api("api/google/credentials", {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({client_id, client_secret, redirect_uri})});
-    if (body && body.error) { resultEl.textContent = body.error; return; }
+    if (body && (body.error || body.code)) { resultEl.textContent = body.error || body.message; return; }
     document.getElementById("google-creds-client-secret").value = "";
     resultEl.textContent = dict[lang].settingsSaved;
     await renderGoogleCalendarStatus();
@@ -1625,7 +1676,7 @@ async function startGoogleLogin(){
   try {
     const data = await api("api/google/login");
     if (data.url) { window.location.href = data.url; }
-    else { document.getElementById("google-calendar-status").textContent = data.error || dict[lang].googleCalendarNotConfigured; }
+    else { document.getElementById("google-calendar-status").textContent = data.error || data.message || dict[lang].googleCalendarNotConfigured; }
   } catch (e) { /* 401 already handled in api() */ }
 }
 async function renderGoogleCalendarStatus(){
