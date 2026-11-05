@@ -3,6 +3,9 @@ use rs_sync::sync_engine::run_job;
 use std::process::Command;
 use uuid::Uuid;
 
+// set_current_dir はプロセス全体に効くため、並列実行されるテスト同士が競合しないよう直列化する。
+static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn git(args: &[&str], cwd: &std::path::Path) {
     let status = Command::new("git")
         .args(args)
@@ -49,6 +52,7 @@ fn empty_schedule() -> Schedule {
 /// bare "dest" repo.
 #[test]
 fn one_way_sync_replicates_commit() {
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().unwrap();
     let job_root = tmp.path().join(format!("job-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&job_root).unwrap();
@@ -107,6 +111,7 @@ fn one_way_sync_replicates_commit() {
 /// with no conflict flagged.
 #[test]
 fn two_way_sync_propagates_source_change_without_conflict() {
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().unwrap();
     let job_root = tmp.path().join(format!("job2-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&job_root).unwrap();
@@ -164,6 +169,7 @@ fn two_way_sync_propagates_source_change_without_conflict() {
 /// never touched.
 #[test]
 fn two_way_sync_propagates_dest_only_change_back_to_source() {
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().unwrap();
     let job_root = tmp.path().join(format!("job3-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&job_root).unwrap();
@@ -237,6 +243,7 @@ fn two_way_sync_propagates_dest_only_change_back_to_source() {
 /// CLAUDE.md ("force pushでの上書きはしない") that had no test coverage at all.
 #[test]
 fn two_way_sync_detects_conflict_when_both_sides_diverge_and_then_skips_it() {
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().unwrap();
     let job_root = tmp.path().join(format!("job4-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&job_root).unwrap();
