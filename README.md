@@ -403,3 +403,6 @@ Gitbucket)間でリポジトリを同期・バックアップするWebアプリ�
 - **WASM по-прежнему остаётся технологией для интерфейса.** Изменилось лишь то, что вызываемый им API теперь построен на Connect.
 - Интерфейсы, форма которых задана внешним стандартом (ACME, обратные вызовы OAuth, вебхуки сторонних сервисов, проверки работоспособности, статические файлы, OTLP), остаются обычным HTTP.
 - **Если есть сомнения — выбирайте Connect.**
+
+## API(2026-11-05〜): REST全廃・Connect
+公開APIは `POST /rs_sync.v1.Sync/<Method>`(`content-type: application/json`、`id`/`repo`は本文、エラーは`{"code","message"}`)のみ。例外(規格どおり): `/healthz`・`/healthz/scheduler`・`/`・`/api/auth/google/callback`(GoogleのOAuth)。旧`/api/*`のRESTは削除済み。メソッド一覧は`src/connect.rs`。

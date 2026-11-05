@@ -266,3 +266,9 @@ cargo test --test sync_integration -- --test-threads=1  # 実git bareリポジ�
 - **WASM по-прежнему остаётся технологией для интерфейса.** Изменилось лишь то, что вызываемый им API теперь построен на Connect.
 - Интерфейсы, форма которых задана внешним стандартом (ACME, обратные вызовы OAuth, вебхуки сторонних сервисов, проверки работоспособности, статические файлы, OTLP), остаются обычным HTTP.
 - **Если есть сомнения — выбирайте Connect.**
+
+## REST全廃→Connect 移行記録(2026-11-05)
+- 移した: 44本(`src/connect.rs`の`METHODS`)。例外: healthz 2、静的画面、Google OAuthコールバック。旧REST経路は削除。
+- 画面(`static/index.html`)は`connectCall`で旧表記をConnect呼び出しへ変換。Androidに旧API呼び出しは無し。
+- 統合テストの失敗は`set_current_dir`の並列競合で、直列化して解消(全テスト通過)。
+- 本番(VPS)反映済み: `/root/rs-sync/target/release/rs-sync`(両サービス共用、バックアップ`.bak-20261105`)。公開URL`easy-web.tokyo/rs-sync/`でConnect(本番401・デモ200)・旧REST404を確認。VPSのcloneは`d5b839e`へff。
