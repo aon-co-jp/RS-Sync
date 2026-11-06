@@ -1794,4 +1794,37 @@ mod tests {
             .await;
         login_resp2.assert_status(StatusCode::FORBIDDEN);
     }
+
+    #[tokio::test]
+    async fn connect_path_params_come_from_body_and_errors_use_code_message() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, auth_state) = make_state(&tmp, true);
+        let token = auth_state.auth.create_session("admin@example.com");
+        let client = TestClient::new(build_app(state, auth_state));
+        let auth = format!("Bearer {token}");
+        // 存在しないジョブへの操作は従来どおり200+本文のフラグ(画面がそれを読む)。idは本文から経路へ渡る。
+        let resp = client.post("/rs_sync.v1.Sync/RunJob").header("Authorization", &auth).body_json(&serde_json::json!({"id": "nope"})).send().await;
+        resp.assert_status_is_ok();
+        let v: serde_json::Value = resp.0.into_body().into_json().await.unwrap();
+        assert_eq!(v["success"], false, "{v}");
+        let resp = client.post("/rs_sync.v1.Sync/ResolveConflict").header("Authorization", &auth).body_json(&serde_json::json!({"id": "nope", "repo": "r/x y"})).send().await;
+        resp.assert_status_is_ok();
+        let v: serde_json::Value = resp.0.into_body().into_json().await.unwrap();
+        assert_eq!(v["ok"], false, "{v}");
+        // 存在しないIDの更新は404で`{"code","message"}`
+        let resp = client.post("/rs_sync.v1.Sync/UpdateAccountToken").header("Authorization", &auth).body_json(&serde_json::json!({"id": "nope", "token": "x"})).send().await;
+        resp.assert_status(StatusCode::NOT_FOUND);
+        let v: serde_json::Value = resp.0.into_body().into_json().await.unwrap();
+        assert_eq!(v["code"], "not_found", "{v}");
+        assert!(v["message"].is_string());
+        // `id`欠落は400、`repo`欠落も400
+        let resp = client.post("/rs_sync.v1.Sync/RunJob").header("Authorization", &auth).body_json(&serde_json::json!({})).send().await;
+        resp.assert_status(StatusCode::BAD_REQUEST);
+        let resp = client.post("/rs_sync.v1.Sync/ResolveConflict").header("Authorization", &auth).body_json(&serde_json::json!({"id": "x"})).send().await;
+        resp.assert_status(StatusCode::BAD_REQUEST);
+        // 旧RESTパス・未知メソッド・GETは使えない
+        client.get("/api/jobs").header("Authorization", &auth).send().await.assert_status(StatusCode::NOT_FOUND);
+        client.post("/rs_sync.v1.Sync/Nope").header("Authorization", &auth).body_json(&serde_json::json!({})).send().await.assert_status(StatusCode::NOT_FOUND);
+        client.get("/rs_sync.v1.Sync/ListJobs").header("Authorization", &auth).send().await.assert_status(StatusCode::METHOD_NOT_ALLOWED);
+    }
 }
