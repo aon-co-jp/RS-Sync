@@ -345,7 +345,7 @@ fn sha256_of_file(path: &Path) -> Option<String> {
     let bytes = std::fs::read(path).ok()?;
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
-    Some(format!("{:x}", hasher.finalize()))
+    Some(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// Windows: 既定のInno Setupインストール先。`RS_SYNC_INSTALLER_ISCC_PATH`

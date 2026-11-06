@@ -4,7 +4,6 @@
 //! `src/auth.rs`と同じ設計(固定パスワード非保存、OTPはSHA-256ハッシュの
 //! みを保持)をそのまま移植したもの。
 
-use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -17,17 +16,15 @@ const MAX_ATTEMPTS: u32 = 5;
 fn hash(value: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(value.as_bytes());
-    format!("{:x}", hasher.finalize())
+    hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn generate_otp() -> String {
-    let mut rng = rand::thread_rng();
-    format!("{:06}", rng.gen_range(0..1_000_000u32))
+    format!("{:06}", rand::random_range(0..1_000_000u32))
 }
 
 fn generate_token() -> String {
-    let mut rng = rand::thread_rng();
-    let bytes: [u8; 24] = rng.gen();
+    let bytes: [u8; 24] = rand::random();
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 

@@ -7,7 +7,7 @@
 //! システムの他リポジトリ(open-easy-web等)が採用している「HMAC-SHA1+
 //! base32を自前実装」という既存方針をそのまま踏襲したもの。
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha1::Sha1;
 
 type HmacSha1 = Hmac<Sha1>;
@@ -17,8 +17,7 @@ const BASE32_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 /// 20バイト(160bit、RFC 4226推奨)のランダム秘密鍵を生成し、認証アプリへ
 /// 手入力できるbase32文字列として返す。
 pub fn generate_secret() -> String {
-    let mut rng = rand::thread_rng();
-    let bytes: [u8; 20] = rand::Rng::gen(&mut rng);
+    let bytes: [u8; 20] = rand::random();
     base32_encode(&bytes)
 }
 
