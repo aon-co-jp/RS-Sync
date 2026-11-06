@@ -237,3 +237,39 @@ impl<E: Endpoint> Endpoint for ConnectEndpoint<E> {
         Ok(connect_error(status, &msg))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_body_rejects_duplicate_keys_deep_nesting_and_non_objects() {
+        assert!(parse_body(br#"{"a":1,"a":2}"#).unwrap_err().contains("duplicate"));
+        assert!(parse_body(br#"{"x":{"a":1,"a":2}}"#).is_err());
+        assert!(parse_body(b"[1]").is_err());
+        assert!(parse_body(b"{").is_err());
+        assert!(parse_body(br#"{"a":1} x"#).is_err());
+        let deep = format!("{}1{}", "[".repeat(40), "]".repeat(40));
+        assert!(parse_body(format!(r#"{{"a":{deep}}}"#).as_bytes()).unwrap_err().contains("deep"));
+        assert!(parse_body(b"  ").unwrap().is_empty());
+        assert_eq!(parse_body(br#"{"id":"x"}"#).unwrap()["id"], "x");
+    }
+
+    #[test]
+    fn method_table_is_unique_and_paths_are_well_formed() {
+        let mut names = std::collections::HashSet::new();
+        for (n, h, p) in METHODS {
+            assert!(names.insert(*n), "duplicate method {n}");
+            assert!(["GET", "POST", "PUT", "DELETE"].contains(h));
+            assert!(p.starts_with('/'));
+        }
+        assert_eq!(pct("a/b c"), "a%2Fb%20c");
+    }
+
+    #[test]
+    fn error_codes_follow_status() {
+        assert_eq!(code_for(StatusCode::UNAUTHORIZED), "unauthenticated");
+        assert_eq!(code_for(StatusCode::NOT_FOUND), "not_found");
+        assert_eq!(code_for(StatusCode::SERVICE_UNAVAILABLE), "unavailable");
+    }
+}
