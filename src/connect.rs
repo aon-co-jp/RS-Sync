@@ -195,8 +195,9 @@ impl<E: Endpoint> Endpoint for ConnectEndpoint<E> {
             Ok(o) => o,
             Err(e) => return Ok(connect_error(StatusCode::BAD_REQUEST, &e)),
         };
-        let mut path = String::new();
-        for seg in tmpl.split('/').filter(|s| !s.is_empty()) {
+        // 内部ルーターもConnect形式(`/rs_sync.v1.Sync/<Method>[/<id>[/<repo>]]`)で登録している。
+        let mut path = format!("/{SERVICE}/{method}");
+        for seg in tmpl.split('/').filter(|s| s.starts_with(':')) {
             path.push('/');
             if let Some(key) = seg.strip_prefix(':') {
                 match obj.get(key).and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
