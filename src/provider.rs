@@ -259,47 +259,47 @@ impl Provider for GitHubProvider {
 
 // ---------------- open-gitea (self-hosted) ----------------
 // open-gitea (aon-co-jp/open-gitea) exposes git smart-HTTP directly plus a small JSON API
-// (`GET /api/repos`, `PUT /repos/:name` to create). Repo creation and git push both
+// (Connect: `POST /open_gitea.v1.Gitea/ListRepos` and `/CreateRepo`; REST was abolished 2026-11-07). Repo creation and git push both
 // require auth: open-gitea accepts `Authorization: Bearer <session-token>` on the
 // JSON API, and `email:session-token` Basic auth embedded in the git remote URL
 // (see open-gitea's CLAUDE.md "git CLI向け認証方式"). `account.owner` holds the
 // login email for this provider (not an org/namespace like GitHub/Gitea), and
 // `account.token` holds the OTP session token obtained via
-// `POST /api/auth/verify-otp` on the open-gitea instance.
+// Connect `VerifyOtp` on the open-gitea instance.
 pub struct OpenGiteaProvider;
-
-#[derive(Deserialize)]
-struct OpenGiteaRepoEntry {
-    name: String,
-}
 
 impl Provider for OpenGiteaProvider {
     fn list_repos(&self, account: &Account) -> Result<Vec<String>> {
         let client = http_client();
-        let url = format!("{}/api/repos", account.api_base.trim_end_matches('/'));
+        let url = format!("{}/open_gitea.v1.Gitea/ListRepos", account.api_base.trim_end_matches('/'));
         // 2026-08-01追記(実機検証で確認したGitHubプロバイダと同じ罠を
         // 未然に防ぐ): 空トークンの場合は`Authorization`ヘッダー自体を
         // 送らない。open-gitea自身は現状空Bearerでも200を返す実装だが
         // (`https://easy-web.tokyo/open-gitea/api/repos`で実機確認済み)、
         // GitHubで実際に踏んだ「空トークンでの匿名フォールバック拒否」を
         // 前提にせず、常にこの安全側パターンへ揃えておく。
-        let req = maybe_auth_header(client.get(&url), "Authorization", &account.token, |t| format!("Bearer {t}"));
+        let req = maybe_auth_header(client.post(&url).json(&serde_json::json!({})), "Authorization", &account.token, |t| format!("Bearer {t}"));
         let resp = req.send()?;
         if !resp.status().is_success() {
             return Err(anyhow!("open-gitea list_repos failed: {}", resp.status()));
         }
-        let entries: Vec<OpenGiteaRepoEntry> = resp.json().unwrap_or_default();
-        Ok(entries.into_iter().map(|e| e.name).collect())
+        // 応答は名前の配列(`["a.git", ...]`)。念のためオブジェクト形式(`{"name": ...}`)も受ける。
+        let value: serde_json::Value = resp.json().unwrap_or_default();
+        let names = value
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string).or_else(|| v.get("name")?.as_str().map(str::to_string)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(names)
     }
 
     fn ensure_repo(&self, account: &Account, repo: &str) -> Result<()> {
         let client = http_client();
-        let url = format!(
-            "{}/repos/{}",
-            account.api_base.trim_end_matches('/'),
-            repo
-        );
-        let req = maybe_auth_header(client.put(&url), "Authorization", &account.token, |t| format!("Bearer {t}"));
+        let url = format!("{}/open_gitea.v1.Gitea/CreateRepo", account.api_base.trim_end_matches('/'));
+        let req = maybe_auth_header(client.post(&url).json(&serde_json::json!({ "name": repo })), "Authorization", &account.token, |t| format!("Bearer {t}"));
         let resp = req.send()?;
         // open-gitea returns success or "already exists" style responses; treat any
         // non-5xx as acceptable since this is best-effort per the docs above.
