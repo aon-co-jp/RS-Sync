@@ -1747,3 +1747,11 @@ HANDOFFエントリを置いてある: [open-redmine](https://github.com/aon-co-
 - **WASM по-прежнему остаётся технологией для интерфейса.** Изменилось лишь то, что вызываемый им API теперь построен на Connect.
 - Интерфейсы, форма которых задана внешним стандартом (ACME, обратные вызовы OAuth, вебхуки сторонних сервисов, проверки работоспособности, статические файлы, OTLP), остаются обычным HTTP.
 - **Если есть сомнения — выбирайте Connect.**
+
+## HANDOFF追記(2026-11-08) 依存を最新の主要版へ更新
+
+- 更新: rand 0.10 / sha2 0.11 / hmac 0.13 / sha1 0.11 / thiserror 2 / reqwest 0.13 / russh 0.65 / russh-sftp 3 / smb2 0.43(`cargo update`でロックも更新)。
+- 新APIへの修正: `rand::random`/`random_range`(thread_rng廃止)、sha2の出力は自前で16進化、hmacは`KeyInit`をimport、reqwestのTLS機能は`rustls`(aws-lc-rs)・`form`を明示。
+- 確認済み: `cargo test --no-fail-fast`全通過(83+15+4)、`cargo ndk`でarm64-v8a/x86_64のreleaseビルド成功(aws-lc-rsでも通る)。Android実機の起動確認は未実施。
+- 実バグではなくテスト側の食い違い: `open_gitea_list_repos_sends_expected_path_and_bearer_header`はConnect化(2aa17fb)に追従しておらず`POST /open_gitea.v1.Gitea/ListRepos`へ修正した。
+- 既知: 双方向同期の結合テスト`two_way_sync_propagates_dest_only_change_back_to_source`が、全テストを一括実行した直後に稀に落ちることがあった(単独5回・全体複数回では再現せず、更新前のロックでも1回発生)。原因は未特定。

@@ -757,7 +757,7 @@ mod tests {
         let repos = OpenGiteaProvider.list_repos(&acc).unwrap();
         assert_eq!(repos, vec!["repo-e".to_string()]);
         let req = server.last_request();
-        assert!(req.starts_with("GET /api/repos"), "req={req}");
+        assert!(req.starts_with("POST /open_gitea.v1.Gitea/ListRepos"), "req={req}");
         assert!(req.to_lowercase().contains("authorization: bearer session-token"), "req={req}");
     }
 
