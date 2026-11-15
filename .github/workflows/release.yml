@@ -73,9 +73,46 @@ jobs:
           name: rs-sync-installer
           path: installer/windows/dist/rs-sync-installer.exe
 
+
+  build-windows-arm64:
+    name: Windows ARM64 (Snapdragon, aarch64)
+    runs-on: windows-11-arm
+    continue-on-error: true  # Snapdragon (Windows on ARM64); never blocks the release
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build --release --bin rs-sync
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item target/release/rs-sync.exe dist/
+          Copy-Item install.ps1 dist/
+          Compress-Archive -Path dist/* -DestinationPath rs-sync-windows-aarch64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rs-sync-windows-aarch64
+          path: rs-sync-windows-aarch64.zip
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build rs-sync-installer.exe
+        # ユーザー指摘「rs-sync-installer.exeが見つからない」への対応
+        # (2026-08-26)——installer/windows/rs-sync.iss自体は以前から
+        # 存在していたが、CIがこれを一度もビルド・公開していなかった
+        # ことが根本原因(このステップが丸ごと欠けていた)。
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=$version installer\windows\rs-sync.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rs-sync-installer
+          path: installer/windows/dist/rs-sync-installer.exe
+
   release:
     name: GitHub Releaseへ添付
-    needs: [build-linux, build-windows]
+    needs: [build-linux, build-windows, build-windows-arm64]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
