@@ -280,3 +280,13 @@ cargo test --test sync_integration -- --test-threads=1  # 実git bareリポジ�
 - 確認済み: `cargo test --no-fail-fast`全通過(83+15+4)、`cargo ndk`でarm64-v8a/x86_64のreleaseビルド成功(aws-lc-rsでも通る)。Android実機の起動確認は未実施。
 - 実バグではなくテスト側の食い違い: `open_gitea_list_repos_sends_expected_path_and_bearer_header`はConnect化(2aa17fb)に追従しておらず`POST /open_gitea.v1.Gitea/ListRepos`へ修正した。
 - 既知: 双方向同期の結合テスト`two_way_sync_propagates_dest_only_change_back_to_source`が、全テストを一括実行した直後に稀に落ちることがあった(単独5回・全体複数回では再現せず、更新前のロックでも1回発生)。原因は未特定。
+
+## 追記(2026-11-16) スケジュール拡充・Googleカレンダー連携・アカウント設定・認証アプリログイン
+
+- **スケジュール**: 毎週(曜日ごとに時刻)、毎月カレンダー(今月/来月・24時間表記・「毎日」チェック)、1年分の特定日(`specific_dates`、後から変更可)に対応。判定は`is_due_schedule`、テスト追加済み。
+- **Googleカレンダー連携**: OAuth2(scope `calendar.events`、非公開予定)。同期予定の登録と、スケジュール解除時の「解除しました」予定(日英・日時つき)を自動作成。Googleドライブは中止。**利用者自身のGoogle CloudのClient ID/Secretが必要**で、実OAuthの通し動作は資格情報が無く未検証(状態応答の形のみ確認)。
+- **アカウント設定**: 管理者メールの変更、予備メール(OTPを受け取れる2つ目)、電話番号(参照用のみ。SMS・ログインには未使用)。電話番号未登録でメールログイン中の利用者には登録を促す案内(日英)。
+- **認証アプリでのログイン**(TOTP、RFC 6238自前実装): 「2段階認証」ではなく、**メールOTPまたは認証アプリのコードの"どちらか"でログインできる別経路**。UI表記を訂正済み(旧「2段階認証/2FA」→「認証アプリでのログイン」)。
+- **UI/キャッシュ**: `Cache-Control: no-cache, must-revalidate`+一度だけの強制再読込、ブラウザ自動入力の抑止、間隔の「変更を保存」ボタン、データ量に応じたプリセットの灰色表示、タイムゾーン/国表示。
+- **既知の制限**: 一度も実行していないジョブは次回同期予定を推定できない、旧キャッシュの画面は一度だけ手動の強制再読込が要る、`monthly_days`はバックエンドに残るがUIは`specific_dates`を書く。
+- **未了**: Google OAuthの実機確認(資格情報待ち)、本節の表記訂正のVPS反映(別途デプロイ)。

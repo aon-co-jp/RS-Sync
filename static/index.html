@@ -133,7 +133,7 @@ a{color:#fff}
   <p id="phone-reminder-banner" class="hint hidden" style="color:#ffcf6b"></p>
 
   <details>
-    <summary data-i18n="accountSettingsSummary">アカウント設定(メールアドレス・電話番号・2段階認証)</summary>
+    <summary data-i18n="accountSettingsSummary">アカウント設定(メールアドレス・電話番号・認証アプリログイン)</summary>
 
     <label class="bright" for="settings-admin-email" data-i18n="settingsAdminEmailLabel">管理者メールアドレス(主)</label>
     <input id="settings-admin-email" type="email" placeholder="you@example.com">
@@ -151,11 +151,11 @@ a{color:#fff}
     <div><button id="settings-admin-phone-save" data-i18n="save">保存</button></div>
     <p id="settings-admin-phone-result" class="hint"></p>
 
-    <label class="bright" data-i18n="totpSectionLabel">2段階認証(認証アプリ、メール不要のログイン経路)</label>
+    <label class="bright" data-i18n="totpSectionLabel">認証アプリでのログイン(メールの代わりに使える別のログイン方法)</label>
     <p id="totp-status-text" class="hint"></p>
     <div class="buttons">
-      <button id="totp-setup-btn" data-i18n="totpSetupBtn">2段階認証を設定</button>
-      <button id="totp-disable-btn" data-i18n="totpDisableBtn">2段階認証を無効化</button>
+      <button id="totp-setup-btn" data-i18n="totpSetupBtn">認証アプリ連携を設定</button>
+      <button id="totp-disable-btn" data-i18n="totpDisableBtn">認証アプリ連携を無効化</button>
     </div>
     <div id="totp-setup-panel" class="hidden">
       <p class="hint" data-i18n="totpSetupHintQr">スマホの認証アプリ(Google Authenticator等)のカメラで下のQRコードを撮影して登録するか、読み取れない端末(ガラケー等)の場合は下の文字列を手入力で追加してください。いずれの方法でも表示された6桁コードを入力すれば有効化できます。</p>
@@ -419,21 +419,21 @@ const dict = {
    loggedInAs:"ログイン中:", logout:"ログアウト",
    totpLoginSummary:"代わりに認証アプリのコードでログイン(メール不要)",
    totpLoginCodeLabel:"認証アプリの6桁コード", totpLoginBtn:"このコードでログイン",
-   accountSettingsSummary:"アカウント設定(メールアドレス・電話番号・2段階認証)",
+   accountSettingsSummary:"アカウント設定(メールアドレス・電話番号・認証アプリログイン)",
    settingsAdminEmailLabel:"管理者メールアドレス(主)",
    settingsBackupEmailLabel:"予備メールアドレス(任意、こちらでもログインコードを受け取れます)",
    settingsPhoneLabel:"携帯電話番号(任意、メールアドレスを忘れた際の本人確認用の控え——SMS送信は行いません)",
    settingsPhoneHint:"登録e-mailを忘れた時の為になるべくご登録下さい。 / Please register this if possible, in case you forget your registered email address.",
    settingsSaved:"保存しました。", settingsError:"エラー: ",
    phoneReminderText:"携帯電話番号がまだ登録されていません。登録e-mailを忘れた時の為になるべくご登録下さい。 / You have not registered a phone number yet. Please register one if possible, in case you forget your registered email address.",
-   totpSectionLabel:"2段階認証(認証アプリ、メール不要のログイン経路)",
+   totpSectionLabel:"認証アプリでのログイン(メールの代わりに使える別のログイン方法)",
    totpEnabledStatus:"有効", totpDisabledStatus:"無効",
-   totpSetupBtn:"2段階認証を設定", totpDisableBtn:"2段階認証を無効化",
+   totpSetupBtn:"認証アプリ連携を設定", totpDisableBtn:"認証アプリ連携を無効化",
    totpSetupHint:"下の文字列を認証アプリ(Google Authenticator等)に手入力で追加し、表示された6桁コードを入力してください。",
    totpSetupHintQr:"スマホの認証アプリ(Google Authenticator等)のカメラで下のQRコードを撮影して登録するか、読み取れない端末(ガラケー等)の場合は下の文字列を手入力で追加してください。いずれの方法でも表示された6桁コードを入力すれば有効化できます。",
    totpQrUnavailable:"QRコードを生成できませんでした——下の文字列で登録してください。",
-   totpEnableBtn:"このコードで有効化", totpEnabled:"2段階認証を有効化しました。",
-   totpDisabled:"2段階認証を無効化しました。",
+   totpEnableBtn:"このコードで有効化", totpEnabled:"認証アプリ連携を有効化しました。",
+   totpDisabled:"認証アプリ連携を無効化しました。",
    accountsH:"アカウント", accountsHint:"GitHub・open-gitea・Gitea・GitBucket・GitLab・Bitbucketいずれかのプロバイダで、同期のソース(コピー元)または宛先(コピー先)として使うアカウントを登録します(レンタルサーバー・VPS上で動かしている自前のGitea/GitBucket/open-giteaも、そのURLを指定すれば同様に登録できます)。トークンは同期実行時にサーバー内部でのみ使用し、一覧には表示されません。",
    addAccount:"アカウントを追加",
    accNameLabel:"表示名(自分が分かればどんな名前でも可)", accProviderLabel:"プロバイダ",
@@ -514,21 +514,21 @@ const dict = {
    loggedInAs:"Logged in as:", logout:"Log out",
    totpLoginSummary:"Sign in with an authenticator app code instead (no email needed)",
    totpLoginCodeLabel:"6-digit authenticator app code", totpLoginBtn:"Sign in with this code",
-   accountSettingsSummary:"Account settings (email addresses, phone number, 2FA)",
+   accountSettingsSummary:"Account settings (email addresses, phone number, authenticator-app login)",
    settingsAdminEmailLabel:"Admin email address (primary)",
    settingsBackupEmailLabel:"Backup email address (optional, can also receive login codes)",
    settingsPhoneLabel:"Phone number (optional, kept as a fallback identity check if you forget your email — no SMS is sent)",
    settingsPhoneHint:"登録e-mailを忘れた時の為になるべくご登録下さい。 / Please register this if possible, in case you forget your registered email address.",
    settingsSaved:"Saved.", settingsError:"Error: ",
    phoneReminderText:"携帯電話番号がまだ登録されていません。登録e-mailを忘れた時の為になるべくご登録下さい。 / You have not registered a phone number yet. Please register one if possible, in case you forget your registered email address.",
-   totpSectionLabel:"Two-factor authentication (authenticator app, email-free login path)",
+   totpSectionLabel:"Authenticator-app login (an alternative to e-mail OTP; either works)",
    totpEnabledStatus:"Enabled", totpDisabledStatus:"Disabled",
-   totpSetupBtn:"Set up 2FA", totpDisableBtn:"Disable 2FA",
+   totpSetupBtn:"Set up authenticator app", totpDisableBtn:"Disable authenticator app",
    totpSetupHint:"Add the string below to an authenticator app (e.g. Google Authenticator) manually, then enter the 6-digit code it shows.",
    totpSetupHintQr:"Scan the QR code below with your authenticator app's camera to register it, or if your device can't read QR codes (e.g. a feature phone), add the string below manually instead. Either way, enter the 6-digit code it shows to enable.",
    totpQrUnavailable:"QR code unavailable — use the text secret below.",
-   totpEnableBtn:"Enable with this code", totpEnabled:"Two-factor authentication enabled.",
-   totpDisabled:"Two-factor authentication disabled.",
+   totpEnableBtn:"Enable with this code", totpEnabled:"Authenticator-app login enabled.",
+   totpDisabled:"Authenticator-app login disabled.",
    accountsH:"Accounts", accountsHint:"Register accounts (GitHub, open-gitea, Gitea, GitBucket, GitLab, or Bitbucket) to use as a sync source or destination — including self-hosted Gitea/GitBucket/open-gitea instances running on your own rented server or VPS, just point it at that URL. The token is only ever used server-side during sync and is never shown back in the list.",
    addAccount:"Add account",
    accNameLabel:"Display name (anything you'll recognize)", accProviderLabel:"Provider",
@@ -782,7 +782,7 @@ async function refreshAdminEmailLabel(){
 // ユーザー指示(2026-08-13「ログインのe-mailアドレスも変更可能にして」+
 // 「予備メールアドレスでメールアドレスを二個登録する事も可能にして」+
 // 「初回にe-mailと携帯電話番号も登録して」)への対応: アカウント設定
-// パネル一式(主メール変更・予備メール登録・電話番号登録・2段階認証)。
+// パネル一式(主メール変更・予備メール登録・電話番号登録・認証アプリログイン)。
 async function renderAccountSettings(){
   try {
     const emailData = await api("api/auth/admin-email");
