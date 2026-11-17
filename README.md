@@ -416,3 +416,10 @@ Gitbucket)間でリポジトリを同期・バックアップするWebアプリ�
 - **UI/キャッシュ**: `Cache-Control: no-cache, must-revalidate`+一度だけの強制再読込、ブラウザ自動入力の抑止、間隔の「変更を保存」ボタン、データ量に応じたプリセットの灰色表示、タイムゾーン/国表示。
 - **既知の制限**: 一度も実行していないジョブは次回同期予定を推定できない、旧キャッシュの画面は一度だけ手動の強制再読込が要る、`monthly_days`はバックエンドに残るがUIは`specific_dates`を書く。
 - **未了**: Google OAuthの実機確認(資格情報待ち)、本節の表記訂正のVPS反映(別途デプロイ)。
+
+
+## 開発状況・再開 / Status and resume (2026-11-15)
+
+**日本語**: 依存は最新の主要版へ更新済み・テスト全通過・Androidのクロスビルド成功。未了は、稀に落ちる双方向同期の結合テストの原因特定とAndroid実機の起動確認。再開用メッセージは[`PORTING.md`](PORTING.md)末尾。
+
+**English**: Dependencies are on the latest major versions, all tests pass and the Android cross-builds succeed. Open: root cause of the occasionally failing two-way sync integration test, and a real-device launch check. The resume message is at the end of [`PORTING.md`](PORTING.md).

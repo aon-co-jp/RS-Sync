@@ -290,3 +290,34 @@ cargo test --test sync_integration -- --test-threads=1  # 実git bareリポジ�
 - **UI/キャッシュ**: `Cache-Control: no-cache, must-revalidate`+一度だけの強制再読込、ブラウザ自動入力の抑止、間隔の「変更を保存」ボタン、データ量に応じたプリセットの灰色表示、タイムゾーン/国表示。
 - **既知の制限**: 一度も実行していないジョブは次回同期予定を推定できない、旧キャッシュの画面は一度だけ手動の強制再読込が要る、`monthly_days`はバックエンドに残るがUIは`specific_dates`を書く。
 - **未了**: Google OAuthの実機確認(資格情報待ち)、本節の表記訂正のVPS反映(別途デプロイ)。
+
+
+## 再開用メモ(2026-11-15、別アカウントでの再開用) / Resume notes (for resuming on another account)
+
+### 日本語
+
+**到達点**: 依存を最新の主要版へ更新済み(`3b144cd`)。open-giteaテストの期待値をConnectへ追従(`177d68c`)。いずれもpush済み。`cargo test --no-fail-fast`全通過(83+15+4)、`cargo ndk`でarm64-v8a/x86_64のreleaseビルド成功。
+
+**未了・未確認**:
+1. 双方向同期の結合テスト`two_way_sync_propagates_dest_only_change_back_to_source`が稀に落ちる件の原因(未特定)。単独5回・全体複数回では再現せず。調査(日英のWeb検索+GitHub)で見つかった候補: (a) Windowsでウイルス対策/indexerが一時ファイルを掴み、git操作や削除が時々失敗する、(b) `DATA_DIR="data"`が相対パスで、動作が`set_current_dir`に左右される(結合テスト4件は`CWD_LOCK`で直列化済みだが、tempdir破棄後にカレントが消える形は残る)。次の手: `DATA_DIR`を注入可能にして`set_current_dir`を廃止、失敗時に`handle.exe`で掴んでいるプロセスを確認、失敗メッセージ(`second.message`)を必ず出力。
+2. Android実機での起動確認(`cargo ndk`のビルドは成功、実機は未実施。`reqwest` 0.13の`rustls`はaws-lc-rs)。
+3. `reqwest`のTLSをringに揃えるか(`rustls-no-provider`+手動設定)の判断は未実施。
+
+**注意**: cargoはPATH前置きが要る(`/c/Users/noruk/.cargo/bin`)。全テストの初回は10分近くかかるので、前面で連続実行せず`run_in_background`を使う。Androidは`ANDROID_NDK_HOME=C:\Users\noruk\AppData\Local\Android\Sdk\ndk\27.1.12297006`。`git pull --rebase`で`Cargo.lock`が衝突したら、`git checkout --ours Cargo.lock`→`cargo update`→テスト→`git add`→`git rebase --continue`。モックのテストはAPI形式が変わると静かに古くなるので、形式変更(Connect化など)のたびに期待値を実サーバー呼び出しと合わせて確認する。
+
+**そのまま貼り付ける再開用メッセージ**:
+> `F:\RS-Sync`(aon-co-jp/RS-Sync、main)の`PORTING.md`末尾「再開用メモ(2026-11-15)」を読み、(1)不安定な結合テスト`two_way_sync_propagates_dest_only_change_back_to_source`の原因特定と修正(`DATA_DIR`の注入化、失敗時のログ出力)、(2)Android実機での起動確認、の順に進めてください。長いテストは`run_in_background`で。完了したらCLAUDE.md/PORTING.mdを日英で更新してpushしてください。
+
+### English
+
+**Where things stand**: dependencies were updated to the latest major versions (`3b144cd`) and the open-gitea test expectation was aligned with Connect (`177d68c`); both are pushed. `cargo test --no-fail-fast` passes (83+15+4) and `cargo ndk` release builds succeed for arm64-v8a and x86_64.
+
+**Open / unverified**:
+1. The cause of the occasional failure of the two-way sync integration test `two_way_sync_propagates_dest_only_change_back_to_source` is unknown. It did not reproduce in 5 single runs or several full runs. Candidates from the research (English/Japanese web search + GitHub): (a) on Windows, antivirus/indexers briefly hold temp files so git operations or deletions fail now and then; (b) `DATA_DIR="data"` is a relative path, so behaviour depends on `set_current_dir` (the four integration tests are serialised with `CWD_LOCK`, but the cwd can still point into a dropped tempdir). Next: make `DATA_DIR` injectable and drop `set_current_dir`; use `handle.exe` to find the process holding files at failure time; always print `second.message` on failure.
+2. Launching on a real Android device is not checked (the `cargo ndk` build succeeds; `reqwest` 0.13 `rustls` uses aws-lc-rs).
+3. Whether to align reqwest's TLS with ring (`rustls-no-provider` + manual setup) is undecided.
+
+**Pitfalls**: cargo needs PATH (`/c/Users/noruk/.cargo/bin`). A cold full test run takes close to 10 minutes, so use `run_in_background` instead of looping in the foreground. Android: `ANDROID_NDK_HOME=C:\Users\noruk\AppData\Local\Android\Sdk\ndk\27.1.12297006`. If `git pull --rebase` conflicts on `Cargo.lock`: `git checkout --ours Cargo.lock`, `cargo update`, run the tests, `git add`, `git rebase --continue`. Mock-based tests go stale silently when an API shape changes (e.g. the Connect migration), so re-check expectations against a real server call whenever a shape changes.
+
+**Paste-ready resume message**:
+> Read "Resume notes (2026-11-15)" at the end of `PORTING.md` in `F:\RS-Sync` (aon-co-jp/RS-Sync, main). Then (1) find and fix the cause of the flaky integration test `two_way_sync_propagates_dest_only_change_back_to_source` (make `DATA_DIR` injectable, log failures), and (2) verify the app starts on a real Android device. Use `run_in_background` for long tests. When done, update CLAUDE.md / PORTING.md in Japanese and English and push.
