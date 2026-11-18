@@ -112,8 +112,12 @@ pub fn otpauth_uri(secret: &str, account_label: &str, issuer: &str) -> String {
 /// `main.rs`参照)。エラー訂正レベルは`Medium`(標準的な選択、印刷物や
 /// 画面表示どちらでも安定して読み取れるバランス)。
 pub fn totp_qr_svg(secret: &str, account_label: &str, issuer: &str) -> Result<String, String> {
-    let uri = otpauth_uri(secret, account_label, issuer);
-    let code = qrcode::QrCode::with_error_correction_level(&uri, qrcode::EcLevel::M)
+    text_qr_svg(&otpauth_uri(secret, account_label, issuer))
+}
+
+/// 任意のテキスト(QR確認ログインの確認用URLなど)をSVGのQRコードにする。
+pub fn text_qr_svg(text: &str) -> Result<String, String> {
+    let code = qrcode::QrCode::with_error_correction_level(text, qrcode::EcLevel::M)
         .map_err(|e| format!("QRコード生成に失敗しました / QR code generation failed: {e}"))?;
     let svg = code
         .render()

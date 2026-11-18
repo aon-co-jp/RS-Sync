@@ -115,6 +115,16 @@ a{color:#fff}
   <input id="login-code" type="text" inputmode="numeric" placeholder="123456">
   <div><button id="login-verify-otp" data-i18n="login">ログイン</button></div>
   <p id="login-result" class="muted" aria-live="polite"></p>
+  <div id="qr-only-start" class="hidden">
+    <p class="bright">QR撮影のみでログイン / Log in by scanning a QR code only</p>
+    <div><button id="qr-only-start-btn">QRコードを表示 / Show QR code</button></div>
+    <p class="hint">この方式は秘密の情報を使いません。画面が見える人が確認URLを開ければログインできるため、他人に画面を見せない環境でお使いください。 / This mode uses no secret: anyone who can see the screen and open the URL could log in. Use it only where nobody else can see your screen.</p>
+  </div>
+  <div id="qr-login-box" class="hidden">
+    <p class="bright">スマホ・タブレット・WEBカメラ付き端末でこのQRコードを撮影してください(ボタン操作は不要・自動で確認されます)。 / Scan this QR code with your phone, tablet or webcam device. It confirms automatically; no button press is needed.</p>
+    <div id="qr-login-svg" aria-label="Login QR code" style="max-width:260px"></div>
+    <p id="qr-login-status" class="hint" aria-live="polite"></p>
+  </div>
 
   <details>
     <summary data-i18n="totpLoginSummary">代わりに認証アプリのコードでログイン(メール不要)</summary>
@@ -165,6 +175,16 @@ a{color:#fff}
       <div><button id="totp-enable-btn" data-i18n="totpEnableBtn">このコードで有効化</button></div>
     </div>
     <p id="totp-setup-result" class="hint"></p>
+
+    <label class="bright" for="login-mode-select">ログイン方式 / Login mode</label>
+    <select id="login-mode-select">
+      <option value="otp">メールOTPのみ(既定) / Email OTP only (default)</option>
+      <option value="otp_qr">メールOTP + QR撮影(2段階認証) / Email OTP + QR scan (2-step)</option>
+      <option value="qr">QR撮影のみ(認証アプリ有効時のみ・秘密なし) / QR scan only (needs authenticator app; no secret)</option>
+    </select>
+    <div><button id="login-mode-save">方式を保存 / Save mode</button></div>
+    <p id="login-mode-result" class="hint"></p>
+    <p class="hint">QR撮影は、確認URLを開いた端末で自動承認されます。「QR撮影のみ」は誰でも画面を見られる環境では弱いので、通常は「メールOTP + QR撮影」を推奨します。 / The QR is auto-approved on the device that opens its URL. "QR only" is weak wherever others can see your screen; "Email OTP + QR" is recommended.</p>
   </details>
 </section>
 
@@ -664,6 +684,10 @@ const CONNECT_TABLE = [
   ["POST","installer-sync/run","RunInstallerSync"],
   ["POST","auth/request-otp","RequestOtp"],["POST","auth/verify-otp","VerifyOtp"],
   ["POST","auth/logout","Logout"],["POST","auth/totp-login","TotpLogin"],
+  ["GET","auth/login-mode","GetLoginMode"],["PUT","auth/login-mode","SetLoginMode"],
+  ["POST","auth/qr-login/start","QrLoginStart"],["POST","auth/qr-login/confirm","QrLoginConfirm"],
+  ["POST","auth/qr-login/status","QrLoginStatus"],["POST","auth/qr-login/whoami","QrLoginWhoami"],
+  ["POST","auth/qr-login/finish","QrLoginFinish"],
 ];
 function connectCall(path, opts){
   const verb = ((opts && opts.method) || "GET").toUpperCase();
@@ -729,7 +753,10 @@ document.getElementById("login-verify-otp").onclick = async ()=>{
   try {
     const r = await rpcFetch("api/auth/verify-otp", {method:"POST", body: JSON.stringify({email, code})});
     const body = await r.json();
-    if (r.ok && body.token) {
+    if (r.ok && body.qr_required) {
+      resultEl.textContent = "";
+      showQrLogin(body, email);
+    } else if (r.ok && body.token) {
       localStorage.setItem(TOKEN_KEY, body.token);
       localStorage.setItem(EMAIL_KEY, email);
       resultEl.textContent = "";
@@ -740,6 +767,91 @@ document.getElementById("login-verify-otp").onclick = async ()=>{
     }
   } catch(e) { resultEl.textContent = String(e); }
 };
+
+// ---- QR確認ログイン(2026-11-18): QRを表示し、別端末で撮影(自動承認)されるまで数秒おきに確認する ----
+let qrLoginTimer = null;
+function stopQrLoginPoll(){ if (qrLoginTimer) { clearInterval(qrLoginTimer); qrLoginTimer = null; } }
+function showQrLogin(info, email){
+  stopQrLoginPoll();
+  document.getElementById("qr-login-box").className = "";
+  document.getElementById("qr-login-svg").innerHTML = info.qr_svg;
+  const st = document.getElementById("qr-login-status");
+  st.textContent = "撮影を待っています… / Waiting for the scan…";
+  const started = Date.now();
+  qrLoginTimer = setInterval(async ()=>{
+    if (Date.now() - started > 3 * 60 * 1000) {
+      stopQrLoginPoll();
+      st.textContent = "有効期限が切れました。最初からやり直してください。 / Expired. Please start again.";
+      return;
+    }
+    try {
+      const r = await rpcFetch("api/auth/qr-login/status", {method:"POST", body: JSON.stringify({id: info.qr_login_id})});
+      const b = await r.json();
+      if (!r.ok) { stopQrLoginPoll(); st.textContent = b.message || b.error || "error"; return; }
+      if (b.confirmed) {
+        stopQrLoginPoll();
+        const f = await rpcFetch("api/auth/qr-login/finish", {method:"POST", body: JSON.stringify({id: info.qr_login_id})});
+        const fb = await f.json();
+        if (f.ok && fb.token) {
+          localStorage.setItem(TOKEN_KEY, fb.token);
+          if (email) localStorage.setItem(EMAIL_KEY, email);
+          document.getElementById("qr-login-box").className = "hidden";
+          st.textContent = "";
+          syncAuthVisibility();
+          renderAll();
+          refreshAdminEmailLabel();
+        } else {
+          st.textContent = fb.message || fb.error || "login failed";
+        }
+      }
+    } catch(e) { /* 次の周期で再試行 */ }
+  }, 2000);
+}
+
+document.getElementById("qr-only-start-btn").onclick = async ()=>{
+  const email = document.getElementById("login-email").value.trim();
+  const resultEl = document.getElementById("login-result");
+  try {
+    const r = await rpcFetch("api/auth/qr-login/start", {method:"POST", body: JSON.stringify({account_email: email})});
+    const body = await r.json();
+    if (r.ok && body.qr_required) { resultEl.textContent = ""; showQrLogin(body, email); }
+    else resultEl.textContent = body.message || body.error || "error";
+  } catch(e) { resultEl.textContent = String(e); }
+};
+
+// ログイン方式に合わせて、ログイン画面の入力欄を出し分ける。
+async function applyLoginMode(){
+  try {
+    const r = await rpcFetch("api/auth/login-mode");
+    if (!r.ok) return;
+    const { login_mode } = await r.json();
+    const qrOnly = login_mode === "qr";
+    document.getElementById("qr-only-start").className = qrOnly ? "" : "hidden";
+    for (const id of ["login-request-otp", "login-code", "login-verify-otp"]) {
+      const el = document.getElementById(id);
+      const wrap = el.tagName === "BUTTON" ? el.parentElement : el;
+      wrap.style.display = qrOnly ? "none" : "";
+    }
+    const lbl = document.querySelector('label[for="login-code"]');
+    if (lbl) lbl.style.display = qrOnly ? "none" : "";
+  } catch(e) {}
+}
+applyLoginMode();
+
+document.getElementById("login-mode-save").onclick = async ()=>{
+  const sel = document.getElementById("login-mode-select");
+  const out = document.getElementById("login-mode-result");
+  try {
+    const data = await api("api/auth/login-mode", {method:"PUT", body: JSON.stringify({login_mode: sel.value})});
+    out.textContent = data.login_mode ? "保存しました / Saved: " + data.login_mode : (data.message || data.error || "error");
+  } catch(e) { out.textContent = String(e); }
+};
+async function loadLoginModeSetting(){
+  try {
+    const data = await api("api/auth/login-mode");
+    if (data.login_mode) document.getElementById("login-mode-select").value = data.login_mode;
+  } catch(e) {}
+}
 
 document.getElementById("logout-btn").onclick = async ()=>{
   try { await api("api/auth/logout", {method:"POST"}); } catch(e) {}
@@ -784,6 +896,7 @@ async function refreshAdminEmailLabel(){
 // 「初回にe-mailと携帯電話番号も登録して」)への対応: アカウント設定
 // パネル一式(主メール変更・予備メール登録・電話番号登録・認証アプリログイン)。
 async function renderAccountSettings(){
+  loadLoginModeSetting();
   try {
     const emailData = await api("api/auth/admin-email");
     document.getElementById("settings-admin-email").value = emailData.admin_email || "";

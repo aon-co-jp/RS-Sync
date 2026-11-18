@@ -1796,3 +1796,25 @@ HANDOFFエントリを置いてある: [open-redmine](https://github.com/aon-co-
 
 **Paste-ready resume message**:
 > Read "Resume notes (2026-11-15)" at the end of `PORTING.md` in `F:\RS-Sync` (aon-co-jp/RS-Sync, main). Then (1) find and fix the cause of the flaky integration test `two_way_sync_propagates_dest_only_change_back_to_source` (make `DATA_DIR` injectable, log failures), and (2) verify the app starts on a real Android device. Use `run_in_background` for long tests. When done, update CLAUDE.md / PORTING.md in Japanese and English and push.
+
+
+## 2026-11-18 追記: ログイン方式3択(otp / otp_qr / qr)とQR確認ログイン / Login modes and QR-confirm login
+
+**日本語**: 4択ログイン方式の横展開(RS-Sync分)を実装した。`otp`(既定、メールOTPのみ)・`otp_qr`(メールOTP+QR撮影=2段階認証)・`qr`(QR撮影のみ)。「パスワード無し」は、同期先の資格情報を扱う管理アプリのため**意図的に実装しない**。QRは秘密鍵・公開鍵を使わず、3分・1回限りのランダムトークンを含むURLだけを埋め込む(撮影端末でページが開くと自動で確認され、ボタン操作は不要)。
+- 変更: `src/auth.rs`(QRセッション・`login_mode`、既定は再起動でotpへ戻る安全側)、`src/main.rs`(`VerifyOtp`は`otp_qr`でトークンでなくQRを返す、`QrLoginStart/Confirm/Status/Whoami/Finish`、`GetLoginMode`、`SetLoginMode`、`/qr-confirm.html`)、`src/connect.rs`(メソッド表に7件追加)、`src/totp.rs`(`text_qr_svg`)、`static/index.html`(ログイン画面のQR表示・ポーリング、設定パネルの方式選択)、`static/qr-confirm.html`(新規)。公開は引き続きConnect(`POST /rs_sync.v1.Sync/<Method>`)のみで、RESTは追加していない。
+- 締め出し防止: `qr`はメールOTPを無効にするため、認証アプリ(TOTP)が有効なときだけ選べ、`QrLoginStart`も登録メールを名乗り、かつTOTP有効のときだけQRを出す。`SetLoginMode`はログイン必須。
+- **正直な開示**: `qr`単独は秘密を持たないため弱い(画面を見た人が確認URLを開ければ通る)。通常は`otp_qr`を推奨(画面にも明記)。
+- 確認済み: `cargo test --locked`全通過(auth 2件・結合4件を追加、既存含め失敗0)。実ブラウザで`qr`モードを通し(QR表示→別タブで確認URLを開く→元のタブが自動でログイン状態)。
+- **未了**: 実スマホのカメラで撮影した通し試験、実SMTPでの`otp_qr`通し(メールOTPは本人が受信)、本番VPSへの反映(rs-sync・rs-sync-demoの再ビルドと再起動、旧バイナリ退避)、`login_mode`の永続化(現状は再起動でotpへ戻る)。
+- 注意: ローカルの`F:\runo\repository\RS-Sync`は`origin/main`と履歴が分岐している(ahead 57 / behind 78)ため、`git pull`せず、`F:\runo\repository\_work\RS-Sync`(`origin/main`の新規clone)で作業した。
+
+**English**: The login-mode rollout reached RS-Sync: `otp` (default, email OTP only), `otp_qr` (email OTP + QR scan = real 2-step) and `qr` (QR scan only). "No password" is **intentionally not implemented** because this admin app holds sync credentials. The QR uses no public/private keys; it only encodes a URL with a random token that lives 3 minutes and works once (the scanning device confirms automatically when the page opens, no button press).
+- Changed: `src/auth.rs` (QR sessions, `login_mode`; resets to `otp` on restart, the safe side), `src/main.rs` (`VerifyOtp` returns a QR instead of a token in `otp_qr`; `QrLoginStart/Confirm/Status/Whoami/Finish`, `GetLoginMode`, `SetLoginMode`, `/qr-confirm.html`), `src/connect.rs` (7 methods added), `src/totp.rs` (`text_qr_svg`), `static/index.html` (QR display and polling on the login screen, mode selector in settings), `static/qr-confirm.html` (new). Still Connect-only (`POST /rs_sync.v1.Sync/<Method>`); no REST added.
+- Lock-out guard: `qr` disables email OTP, so it can be selected only while the authenticator app (TOTP) is enabled, and `QrLoginStart` shows a QR only for a registered email with TOTP enabled. `SetLoginMode` requires login.
+- **Honest disclosure**: `qr` alone holds no secret and is weak (anyone who sees the screen and opens the URL gets in). `otp_qr` is recommended (also stated in the UI).
+- Verified: `cargo test --locked` all green (2 auth + 4 integration tests added, 0 failures). In a real browser the `qr` mode worked end to end (QR shown, confirm URL opened in another tab, the first tab logged in by itself).
+- **Open**: a real phone-camera scan, `otp_qr` with real SMTP (the owner receives the OTP), deployment to the production VPS (rebuild and restart rs-sync / rs-sync-demo, keep the old binary), persisting `login_mode` (it currently resets to `otp` on restart).
+- Note: the local `F:\runo\repository\RS-Sync` has diverged from `origin/main` (ahead 57 / behind 78), so do not `git pull` there; the work was done in `F:\runo\repository\_work\RS-Sync` (a fresh clone of `origin/main`).
+
+**Paste-ready resume message / 再開用メッセージ**:
+> RS-Syncの「2026-11-18 追記: ログイン方式3択」を読んでください(`PORTING.md`末尾、正本はRUNO `PORTING.md`の「2026-11-18 ログイン方式の横展開」)。(1) 実スマホでQR撮影の通し試験、(2) 本番VPSへ反映(rs-sync・rs-sync-demoを再ビルド・再起動、旧バイナリ退避)、(3) 残りの横展開: RS-Ops(全面REST、先にConnect化が必要)・open-gitea・open-redmine。作業は`origin/main`の新規cloneで行い、分岐した手元クローンで`git pull`しない。/ Read "2026-11-18 Addendum: login modes" at the end of `PORTING.md`. (1) Real phone-camera QR test, (2) deploy to the production VPS (rebuild/restart rs-sync and rs-sync-demo, keep the old binary), (3) remaining rollout: RS-Ops (all REST, needs Connect first), open-gitea, open-redmine. Work in a fresh clone of `origin/main`; never `git pull` in the diverged local clone.

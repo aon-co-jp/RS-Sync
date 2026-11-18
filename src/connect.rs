@@ -61,6 +61,13 @@ pub const METHODS: &[(&str, &str, &str)] = &[
     ("VerifyOtp", "POST", "/auth/verify-otp"),
     ("Logout", "POST", "/auth/logout"),
     ("TotpLogin", "POST", "/auth/totp-login"),
+    ("GetLoginMode", "GET", "/auth/login-mode"),
+    ("SetLoginMode", "PUT", "/auth/login-mode"),
+    ("QrLoginStart", "POST", "/auth/qr-login/start"),
+    ("QrLoginConfirm", "POST", "/auth/qr-login/confirm"),
+    ("QrLoginStatus", "POST", "/auth/qr-login/status"),
+    ("QrLoginWhoami", "POST", "/auth/qr-login/whoami"),
+    ("QrLoginFinish", "POST", "/auth/qr-login/finish"),
 ];
 
 fn code_for(status: StatusCode) -> &'static str {

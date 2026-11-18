@@ -423,3 +423,9 @@ Gitbucket)間でリポジトリを同期・バックアップするWebアプリ�
 **日本語**: 依存は最新の主要版へ更新済み・テスト全通過・Androidのクロスビルド成功。未了は、稀に落ちる双方向同期の結合テストの原因特定とAndroid実機の起動確認。再開用メッセージは[`PORTING.md`](PORTING.md)末尾。
 
 **English**: Dependencies are on the latest major versions, all tests pass and the Android cross-builds succeed. Open: root cause of the occasionally failing two-way sync integration test, and a real-device launch check. The resume message is at the end of [`PORTING.md`](PORTING.md).
+
+## ログイン方式 / Login modes (2026-11-18)
+
+**日本語**: 管理画面のログイン方式を設定パネルで選べます。`otp`(メールOTPのみ・既定)、`otp_qr`(メールOTP+QR撮影の2段階認証・推奨)、`qr`(QR撮影のみ・認証アプリ有効時のみ。秘密を持たないため弱い方式)。QRは3分・1回限りのURLで、撮影した端末でページが開くと自動で確認されます。「パスワード無し」は同期先の資格情報を扱うため実装していません。詳細は`PORTING.md`末尾。
+
+**English**: Pick the admin login mode in the settings panel: `otp` (email OTP only, default), `otp_qr` (email OTP + QR scan, a real 2-step login; recommended), `qr` (QR scan only; needs the authenticator app and is weak because it holds no secret). The QR is a URL valid for 3 minutes and one use; the scanning device confirms automatically when the page opens. "No password" is not implemented because this app holds sync credentials. See the end of `PORTING.md`.

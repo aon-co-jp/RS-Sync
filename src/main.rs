@@ -1,5 +1,5 @@
 mod connect;
-use rs_sync::auth::{AuthStore, RequestOtpOutcome};
+use rs_sync::auth::{is_valid_login_mode, AuthStore, RequestOtpOutcome, LOGIN_MODE_OTP_QR, LOGIN_MODE_QR};
 use rs_sync::mail::{self, SmtpConfig};
 use rs_sync::model::{self, Account, AppState, Direction, Schedule, SyncJob};
 use rs_sync::scheduler;
@@ -945,14 +945,143 @@ struct VerifyOtpReq {
 }
 
 #[handler]
-fn verify_otp(auth_state: Data<&Arc<AuthState>>, Json(body): Json<VerifyOtpReq>) -> Response {
+fn verify_otp(auth_state: Data<&Arc<AuthState>>, req: &Request, Json(body): Json<VerifyOtpReq>) -> Response {
+    let mode = auth_state.auth.login_mode();
+    if mode == LOGIN_MODE_QR {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "このサーバーはQR撮影のみのログイン方式です。 / This server uses QR-only login.",
+        );
+    }
     match auth_state.auth.consume_otp(&body.email, &body.code) {
+        Ok(()) if mode == LOGIN_MODE_OTP_QR => {
+            // メールOTPに加え、QR撮影による確認を第二要素にする(真の2段階認証)。
+            let id = auth_state.auth.start_qr_login(&body.email);
+            let (host, scheme) = request_host_scheme(req);
+            qr_login_start_response(&host, scheme, id, true)
+        }
         Ok(()) => {
             let token = auth_state.auth.create_session(&body.email);
             json_ok(&serde_json::json!({"token": token}))
         }
         Err(e) => error_response(StatusCode::UNAUTHORIZED, e.message()),
     }
+}
+
+// ---------------- QR確認ログイン・ログイン方式(2026-11-18) ----------------
+
+fn request_host_scheme(req: &Request) -> (String, &'static str) {
+    let host = req.header("host").unwrap_or("localhost").to_string();
+    let scheme = if req.header("x-forwarded-proto") == Some("https") { "https" } else { "http" };
+    (host, scheme)
+}
+
+fn qr_login_start_response(host: &str, scheme: &str, id: String, otp_verified: bool) -> Response {
+    let confirm_url = format!("{scheme}://{host}/qr-confirm.html?id={id}");
+    match rs_sync::totp::text_qr_svg(&confirm_url) {
+        Ok(qr_svg) => json_ok(&serde_json::json!({
+            "qr_required": true,
+            "otp_verified": otp_verified,
+            "qr_login_id": id,
+            "qr_svg": qr_svg,
+            "confirm_url": confirm_url,
+        })),
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &format!("QRコード生成に失敗しました / QR code generation failed: {e}")),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct QrLoginStartReq {
+    account_email: String,
+}
+
+#[derive(serde::Deserialize)]
+struct QrLoginIdReq {
+    id: String,
+}
+
+#[derive(serde::Deserialize)]
+struct LoginModeReq {
+    login_mode: String,
+}
+
+#[handler]
+fn get_login_mode(auth_state: Data<&Arc<AuthState>>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({"login_mode": auth_state.auth.login_mode()}))
+}
+
+/// ログイン方式の切り替え(ログイン済みの管理者のみ)。`qr`はメールOTPを無効にするため、
+/// 締め出し防止のため認証アプリ(TOTP)が有効なときだけ選べる。
+#[handler]
+fn set_login_mode(auth_state: Data<&Arc<AuthState>>, Json(body): Json<LoginModeReq>) -> Response {
+    if !is_valid_login_mode(&body.login_mode) {
+        return error_response(StatusCode::BAD_REQUEST, "login_mode must be one of: otp, qr, otp_qr");
+    }
+    if body.login_mode == LOGIN_MODE_QR && !*auth_state.totp_enabled.lock().unwrap() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "QR撮影のみの方式は、先に認証アプリ(2段階認証)を有効にしてください。 / Enable the authenticator app (TOTP) first to use QR-only login.",
+        );
+    }
+    auth_state.auth.set_login_mode(&body.login_mode);
+    json_ok(&serde_json::json!({"ok": true, "login_mode": body.login_mode}))
+}
+
+/// `qr`方式の開始。登録済みの連絡先を名乗り、かつ認証アプリ(TOTP)が有効なときだけQRを出す。
+#[handler]
+fn qr_login_start(auth_state: Data<&Arc<AuthState>>, req: &Request, Json(body): Json<QrLoginStartReq>) -> Response {
+    if auth_state.auth.login_mode() != LOGIN_MODE_QR {
+        return error_response(StatusCode::FORBIDDEN, "QR撮影のみのログイン方式は選ばれていません。 / QR-only login is not selected.");
+    }
+    let email = body.account_email.trim().to_string();
+    let is_registered = email == *auth_state.admin_email.lock().unwrap()
+        || auth_state.backup_email.lock().unwrap().as_deref() == Some(email.as_str());
+    if !is_registered || !*auth_state.totp_enabled.lock().unwrap() {
+        return error_response(StatusCode::FORBIDDEN, "この連絡先ではQRログインを利用できません。 / QR login is not available for this contact.");
+    }
+    let id = auth_state.auth.start_qr_login(&email);
+    let (host, scheme) = request_host_scheme(req);
+    qr_login_start_response(&host, scheme, id, false)
+}
+
+/// QR確認ページ(`qr-confirm.html`)が開いた瞬間に自動で呼ぶ。トークンは発行しない。
+#[handler]
+fn qr_login_confirm(auth_state: Data<&Arc<AuthState>>, Json(body): Json<QrLoginIdReq>) -> Response {
+    match auth_state.auth.confirm_qr_login(&body.id) {
+        Ok(()) => json_ok(&serde_json::json!({"ok": true})),
+        Err(e) => error_response(StatusCode::BAD_REQUEST, e.message()),
+    }
+}
+
+#[handler]
+fn qr_login_status(auth_state: Data<&Arc<AuthState>>, Json(body): Json<QrLoginIdReq>) -> Response {
+    match auth_state.auth.qr_login_status(&body.id) {
+        Some(confirmed) => json_ok(&serde_json::json!({"confirmed": confirmed})),
+        None => error_response(StatusCode::NOT_FOUND, "このQRログインは無効か期限切れです。 / This QR login is invalid or has expired."),
+    }
+}
+
+#[handler]
+fn qr_login_whoami(auth_state: Data<&Arc<AuthState>>, Json(body): Json<QrLoginIdReq>) -> Response {
+    match auth_state.auth.qr_login_masked_email(&body.id) {
+        Some(masked) => json_ok(&serde_json::json!({"ok": true, "masked_email": masked})),
+        None => error_response(StatusCode::NOT_FOUND, "このQRログインは無効か期限切れです。 / This QR login is invalid or has expired."),
+    }
+}
+
+#[handler]
+fn qr_login_finish(auth_state: Data<&Arc<AuthState>>, Json(body): Json<QrLoginIdReq>) -> Response {
+    match auth_state.auth.finish_qr_login(&body.id) {
+        Ok(token) => json_ok(&serde_json::json!({"ok": true, "token": token})),
+        Err(e) => error_response(StatusCode::BAD_REQUEST, e.message()),
+    }
+}
+
+#[handler]
+fn qr_confirm_page() -> Response {
+    poem::web::Html(include_str!("../static/qr-confirm.html"))
+        .with_header("Cache-Control", "no-cache, must-revalidate")
+        .into_response()
 }
 
 #[handler]
@@ -1278,6 +1407,7 @@ fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::End
         .at("/rs_sync.v1.Sync/GetInstallerSyncStatus", get(installer_sync_status))
         .at("/rs_sync.v1.Sync/UpdateInstallerSyncConfig", poem::put(update_installer_sync_config))
         .at("/rs_sync.v1.Sync/RunInstallerSync", post(run_installer_sync_now))
+        .at("/rs_sync.v1.Sync/SetLoginMode", poem::put(set_login_mode))
         .with(RequireAuth { auth_state: auth_state.clone() });
 
     let api = Route::new()
@@ -1287,6 +1417,12 @@ fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::End
         // ユーザー指示「e-mail不明になっても2FAでもログイン可能にして」:
         // メールOTPを経由しない代替ログイン経路のため未認証のまま公開する。
         .at("/rs_sync.v1.Sync/TotpLogin", post(totp_login))
+        .at("/rs_sync.v1.Sync/GetLoginMode", get(get_login_mode))
+        .at("/rs_sync.v1.Sync/QrLoginStart", post(qr_login_start))
+        .at("/rs_sync.v1.Sync/QrLoginConfirm", post(qr_login_confirm))
+        .at("/rs_sync.v1.Sync/QrLoginStatus", post(qr_login_status))
+        .at("/rs_sync.v1.Sync/QrLoginWhoami", post(qr_login_whoami))
+        .at("/rs_sync.v1.Sync/QrLoginFinish", post(qr_login_finish))
         .nest("/", protected)
         .with(ReadOnlyGuard { read_only: auth_state.read_only })
         .data(state.clone())
@@ -1296,6 +1432,7 @@ fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::End
     // 例外: GoogleのOAuthリダイレクト(規格により固定のGET)、ヘルスチェック、静的画面。
     Route::new()
         .at("/", get(index))
+        .at("/qr-confirm.html", get(qr_confirm_page))
         .at("/healthz", get(healthz))
         .at("/healthz/scheduler", get(healthz_scheduler))
         .at("/api/auth/google/callback", get(google_calendar_callback))
@@ -1827,4 +1964,173 @@ mod tests {
         client.post("/rs_sync.v1.Sync/Nope").header("Authorization", &auth).body_json(&serde_json::json!({})).send().await.assert_status(StatusCode::NOT_FOUND);
         client.get("/rs_sync.v1.Sync/ListJobs").header("Authorization", &auth).send().await.assert_status(StatusCode::METHOD_NOT_ALLOWED);
     }
+
+    async fn json_of(resp: poem::test::TestResponse) -> serde_json::Value {
+        resp.0.into_body().into_json().await.unwrap()
+    }
+
+    /// 2026-11-18: ログイン方式の管理(既定otp・認証必須・不正値拒否)。
+    #[tokio::test]
+    async fn login_mode_defaults_to_otp_and_requires_login_to_change() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, auth_state) = make_state(&tmp, true);
+        let token = auth_state.auth.create_session("admin@example.com");
+        let client = TestClient::new(build_app(state, auth_state));
+        let auth = format!("Bearer {token}");
+
+        let body = json_of(client.post("/rs_sync.v1.Sync/GetLoginMode").send().await).await;
+        assert_eq!(body["login_mode"], "otp");
+        client
+            .post("/rs_sync.v1.Sync/SetLoginMode")
+            .body_json(&serde_json::json!({"login_mode": "otp_qr"}))
+            .send()
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        client
+            .post("/rs_sync.v1.Sync/SetLoginMode")
+            .header("Authorization", &auth)
+            .body_json(&serde_json::json!({"login_mode": "none"}))
+            .send()
+            .await
+            .assert_status(StatusCode::BAD_REQUEST);
+        client
+            .post("/rs_sync.v1.Sync/SetLoginMode")
+            .header("Authorization", &auth)
+            .body_json(&serde_json::json!({"login_mode": "otp_qr"}))
+            .send()
+            .await
+            .assert_status_is_ok();
+        let body = json_of(client.post("/rs_sync.v1.Sync/GetLoginMode").send().await).await;
+        assert_eq!(body["login_mode"], "otp_qr");
+        client.get("/qr-confirm.html").send().await.assert_status_is_ok();
+    }
+
+    /// otp_qr: OTP検証だけではトークンを出さず、QR確認(自動承認)後に初めてログインできる。
+    #[tokio::test]
+    async fn otp_qr_requires_qr_confirmation_after_otp() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, auth_state) = make_state(&tmp, true);
+        auth_state.auth.set_login_mode("otp_qr");
+        let RequestOtpOutcome::Issued(code) = auth_state.auth.request_otp("admin@example.com");
+        let client = TestClient::new(build_app(state, auth_state));
+
+        let body = json_of(
+            client
+                .post("/rs_sync.v1.Sync/VerifyOtp")
+                .body_json(&serde_json::json!({"email": "admin@example.com", "code": code}))
+                .send()
+                .await,
+        )
+        .await;
+        assert!(body.get("token").is_none(), "no token before QR confirmation");
+        assert_eq!(body["qr_required"], true);
+        let id = body["qr_login_id"].as_str().unwrap().to_string();
+        assert!(body["qr_svg"].as_str().unwrap().contains("<svg"));
+        assert!(body["confirm_url"].as_str().unwrap().ends_with(&format!("/qr-confirm.html?id={id}")));
+
+        let who = json_of(client.post("/rs_sync.v1.Sync/QrLoginWhoami").body_json(&serde_json::json!({"id": id})).send().await).await;
+        assert_eq!(who["masked_email"], "ad***@example.com");
+        // 確認前のfinishは拒否される。
+        client.post("/rs_sync.v1.Sync/QrLoginFinish").body_json(&serde_json::json!({"id": id})).send().await.assert_status(StatusCode::BAD_REQUEST);
+        let st = json_of(client.post("/rs_sync.v1.Sync/QrLoginStatus").body_json(&serde_json::json!({"id": id})).send().await).await;
+        assert_eq!(st["confirmed"], false);
+
+        client.post("/rs_sync.v1.Sync/QrLoginConfirm").body_json(&serde_json::json!({"id": id})).send().await.assert_status_is_ok();
+        let st = json_of(client.post("/rs_sync.v1.Sync/QrLoginStatus").body_json(&serde_json::json!({"id": id})).send().await).await;
+        assert_eq!(st["confirmed"], true);
+
+        let fin = json_of(client.post("/rs_sync.v1.Sync/QrLoginFinish").body_json(&serde_json::json!({"id": id})).send().await).await;
+        let token = fin["token"].as_str().unwrap().to_string();
+        client
+            .post("/rs_sync.v1.Sync/ListAccounts")
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .assert_status_is_ok();
+        // 1回限り。
+        client.post("/rs_sync.v1.Sync/QrLoginFinish").body_json(&serde_json::json!({"id": id})).send().await.assert_status(StatusCode::BAD_REQUEST);
+    }
+
+    /// qr: 認証アプリ(TOTP)が有効なときだけ選べ、メールOTPは使えず、登録メールを名乗ってQRで入る。
+    #[tokio::test]
+    async fn qr_only_needs_totp_and_disables_email_otp() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, auth_state) = make_state(&tmp, true);
+        let token = auth_state.auth.create_session("admin@example.com");
+        let auth = format!("Bearer {token}");
+        let auth_for_checks = auth_state.clone();
+        let client = TestClient::new(build_app(state, auth_state));
+
+        // TOTP無効のうちは選べない(締め出し防止)。
+        client
+            .post("/rs_sync.v1.Sync/SetLoginMode")
+            .header("Authorization", &auth)
+            .body_json(&serde_json::json!({"login_mode": "qr"}))
+            .send()
+            .await
+            .assert_status(StatusCode::BAD_REQUEST);
+
+        *auth_for_checks.totp_secret.lock().unwrap() = Some(rs_sync::totp::generate_secret());
+        *auth_for_checks.totp_enabled.lock().unwrap() = true;
+        client
+            .post("/rs_sync.v1.Sync/SetLoginMode")
+            .header("Authorization", &auth)
+            .body_json(&serde_json::json!({"login_mode": "qr"}))
+            .send()
+            .await
+            .assert_status_is_ok();
+
+        // メールOTPは使えない。
+        client
+            .post("/rs_sync.v1.Sync/VerifyOtp")
+            .body_json(&serde_json::json!({"email": "admin@example.com", "code": "000000"}))
+            .send()
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        // 他人のメールではQRを出さない。
+        client
+            .post("/rs_sync.v1.Sync/QrLoginStart")
+            .body_json(&serde_json::json!({"account_email": "someone@example.com"}))
+            .send()
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+
+        let start = json_of(
+            client
+                .post("/rs_sync.v1.Sync/QrLoginStart")
+                .body_json(&serde_json::json!({"account_email": "admin@example.com"}))
+                .send()
+                .await,
+        )
+        .await;
+        let id = start["qr_login_id"].as_str().unwrap().to_string();
+        client.post("/rs_sync.v1.Sync/QrLoginConfirm").body_json(&serde_json::json!({"id": id})).send().await.assert_status_is_ok();
+        let fin = json_of(client.post("/rs_sync.v1.Sync/QrLoginFinish").body_json(&serde_json::json!({"id": id})).send().await).await;
+        assert!(fin["token"].as_str().is_some());
+    }
+
+    /// otpモード(既定)ではQRログイン開始は拒否され、従来どおりOTPでトークンが出る。
+    #[tokio::test]
+    async fn otp_mode_unchanged_and_qr_start_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, auth_state) = make_state(&tmp, true);
+        let RequestOtpOutcome::Issued(code) = auth_state.auth.request_otp("admin@example.com");
+        let client = TestClient::new(build_app(state, auth_state));
+        client
+            .post("/rs_sync.v1.Sync/QrLoginStart")
+            .body_json(&serde_json::json!({"account_email": "admin@example.com"}))
+            .send()
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        let body = json_of(
+            client
+                .post("/rs_sync.v1.Sync/VerifyOtp")
+                .body_json(&serde_json::json!({"email": "admin@example.com", "code": code}))
+                .send()
+                .await,
+        )
+        .await;
+        assert!(body["token"].as_str().is_some());
+    }
 }
+
