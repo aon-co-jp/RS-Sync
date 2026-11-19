@@ -1013,7 +1013,7 @@ fn get_login_mode(auth_state: Data<&Arc<AuthState>>) -> Json<serde_json::Value> 
 /// ログイン方式の切り替え(ログイン済みの管理者のみ)。`qr`はメールOTPを無効にするため、
 /// 締め出し防止のため認証アプリ(TOTP)が有効なときだけ選べる。
 #[handler]
-fn set_login_mode(auth_state: Data<&Arc<AuthState>>, Json(body): Json<LoginModeReq>) -> Response {
+fn set_login_mode(state: Data<&Arc<AppState>>, auth_state: Data<&Arc<AuthState>>, Json(body): Json<LoginModeReq>) -> Response {
     if !is_valid_login_mode(&body.login_mode) {
         return error_response(StatusCode::BAD_REQUEST, "login_mode must be one of: otp, qr, otp_qr");
     }
@@ -1024,6 +1024,8 @@ fn set_login_mode(auth_state: Data<&Arc<AuthState>>, Json(body): Json<LoginModeR
         );
     }
     auth_state.auth.set_login_mode(&body.login_mode);
+    state.store.lock().unwrap().login_mode = Some(body.login_mode.clone());
+    state.save();
     json_ok(&serde_json::json!({"ok": true, "login_mode": body.login_mode}))
 }
 
@@ -1459,8 +1461,13 @@ async fn main() -> Result<(), std::io::Error> {
             store.totp_enabled,
         )
     };
+    let initial_login_mode = state.store.lock().unwrap().login_mode.clone();
+    let auth_store = AuthStore::default();
+    if let Some(m) = initial_login_mode.filter(|m| is_valid_login_mode(m)) {
+        auth_store.set_login_mode(&m);
+    }
     let auth_state = Arc::new(AuthState {
-        auth: AuthStore::default(),
+        auth: auth_store,
         admin_email: Mutex::new(initial_admin_email),
         backup_email: Mutex::new(initial_backup_email),
         admin_phone: Mutex::new(initial_admin_phone),
@@ -1975,6 +1982,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (state, auth_state) = make_state(&tmp, true);
         let token = auth_state.auth.create_session("admin@example.com");
+        let state_for_check = state.clone();
         let client = TestClient::new(build_app(state, auth_state));
         let auth = format!("Bearer {token}");
 
@@ -2002,6 +2010,7 @@ mod tests {
             .assert_status_is_ok();
         let body = json_of(client.post("/rs_sync.v1.Sync/GetLoginMode").send().await).await;
         assert_eq!(body["login_mode"], "otp_qr");
+        assert_eq!(state_for_check.store.lock().unwrap().login_mode.as_deref(), Some("otp_qr"));
         client.get("/qr-confirm.html").send().await.assert_status_is_ok();
     }
 

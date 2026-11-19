@@ -232,6 +232,9 @@ pub struct Store {
     /// なくなった場合の代替ログイン経路として機能する。
     #[serde(default)]
     pub totp_enabled: bool,
+    /// ログイン方式(otp/otp_qr/qr)。再起動後も保持する。未設定=otp。
+    #[serde(default)]
+    pub login_mode: Option<String>,
     /// 2026-08-26追記(ユーザー指示「この様なインストーラーを分かりやすい
     /// フォルダーに同期システムで自動で配置し直すRS-Syncとして、15分に
     /// 1回でも良いのでその様に機能するようにして」): 各リポジトリの
