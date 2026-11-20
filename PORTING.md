@@ -383,3 +383,23 @@ cargo test --test sync_integration -- --test-threads=1  # 実git bareリポジ�
 - An end-to-end QR login test with a real phone camera (needs a person).
 - An `otp_qr` run with real SMTP.
 - Deploying this fix to the production VPS with the next release (production runs on Linux, where this problem is unlikely).
+
+## 2026-11-20 追記: RS-Sync の同期状態の修正を本番へ反映 / Update: RS-Sync state fix deployed to production
+
+### 日本語
+- `d73c2c1`(同期の記録を確実に保存する修正)を、VPS と同じ glibc 2.39 の WSL `Ubuntu-24.04` で作り(`vps-build.sh`、検査OK)、VPS の `rs-sync`(本番)と `rs-sync-demo`(デモ)を入れ替えました。2つは同じプログラムを使っています。
+- 旧版は `/root/rs-sync/target/release/rs-sync.before-state-20261120` に残しました。失敗したら自動で元に戻す手順付きで、戻す必要はありませんでした。
+- 確認したこと:
+  - 本番: `GetLoginMode` 200、認証なしの `ListAccounts` 401。
+  - デモ: `GetLoginMode` 200、`ListAccounts` 200。
+  - 旧 `/api/accounts` は 404。公開URL 200、`/healthz` 200、エラーログ0、足りないライブラリ0。
+- これで「本番への反映」は完了です。残りは、実スマホのカメラでの QR ログインと、実際のメールでの `otp_qr` の通し試験(人の操作が必要)です。
+
+### English
+- `d73c2c1` (reliable sync-state saving) was built in WSL `Ubuntu-24.04` with glibc 2.39, the same as the VPS (`vps-build.sh`, check OK). It was swapped into `rs-sync` (production) and `rs-sync-demo` (demo) on the VPS; both use the same binary.
+- The old binary is kept at `/root/rs-sync/target/release/rs-sync.before-state-20261120`. The swap had automatic rollback on failure, and no rollback was needed.
+- Verified:
+  - Production: `GetLoginMode` 200; unauthenticated `ListAccounts` 401.
+  - Demo: `GetLoginMode` 200; `ListAccounts` 200.
+  - Old `/api/accounts` 404; public URL 200; `/healthz` 200; error log 0; no missing libraries.
+- The production deploy is done. Still open: a QR login with a real phone camera and an `otp_qr` run with real mail (both need a person).
