@@ -15,6 +15,18 @@ server, local drive, and NAS — see [`src/folder_sync.rs`](src/folder_sync.rs).
 **Linux**: [rs-sync-linux-x86_64.tar.gz](https://github.com/aon-co-jp/RS-Sync/releases/latest/download/rs-sync-linux-x86_64.tar.gz)
 (includes `install.sh`) — see [all releases](https://github.com/aon-co-jp/RS-Sync/releases).
 
+## v0.2.0 (2026-11-20)
+- **日本語**: ログイン方式を3つから選べます(メールのワンタイムコード `otp` / コード+スマホでQR確認 `otp_qr` / QR確認だけ `qr`)。選んだ方式は再起動しても残ります。open-gitea との連携は Connect に移りました(REST は使いません)。試験108件成功、本番VPSでも同じ機能が動いています。
+- **English**: Choose one of three login modes (e-mail one-time code `otp`, code plus a phone QR check `otp_qr`, or QR check only `qr`); the choice survives a restart. The open-gitea link now uses Connect (no REST). 108 tests pass, and the same features run on the production VPS.
+- **简体中文**:可从三种登录方式中选择(邮件一次性验证码 `otp`、验证码加手机扫码确认 `otp_qr`、仅扫码确认 `qr`),重启后仍会保留。与 open-gitea 的连接改用 Connect(不再使用 REST)。108 项测试通过。
+- **繁體中文**:可從三種登入方式中選擇(郵件一次性驗證碼 `otp`、驗證碼加手機掃碼確認 `otp_qr`、僅掃碼確認 `qr`),重新啟動後仍會保留。與 open-gitea 的連線改用 Connect(不再使用 REST)。108 項測試通過。
+- **한국어**: 로그인 방식을 세 가지 중에서 고를 수 있습니다(메일 일회용 코드 `otp`, 코드+휴대폰 QR 확인 `otp_qr`, QR 확인만 `qr`). 선택한 방식은 다시 시작해도 유지됩니다. open-gitea 연동은 Connect로 바뀌었습니다(REST 미사용). 테스트 108개 통과.
+- **Deutsch**: Drei Anmeldearten stehen zur Wahl (Einmalcode per E-Mail `otp`, Code plus QR-Bestätigung am Handy `otp_qr`, nur QR-Bestätigung `qr`); die Wahl bleibt nach einem Neustart erhalten. Die Anbindung an open-gitea läuft jetzt über Connect (kein REST). 108 Tests bestanden.
+- **Français** : trois modes de connexion au choix (code à usage unique par e-mail `otp`, code plus confirmation QR sur le téléphone `otp_qr`, confirmation QR seule `qr`) ; le choix est conservé après un redémarrage. Le lien avec open-gitea passe désormais par Connect (sans REST). 108 tests réussis.
+- **Español**: puedes elegir entre tres modos de inicio de sesión (código de un solo uso por correo `otp`, código más confirmación QR en el móvil `otp_qr`, o solo confirmación QR `qr`); la elección se conserva tras reiniciar. La conexión con open-gitea usa ahora Connect (sin REST). 108 pruebas superadas.
+- **Português**: escolha entre três modos de login (código único por e-mail `otp`, código mais confirmação por QR no celular `otp_qr`, ou só confirmação por QR `qr`); a escolha continua após reiniciar. A ligação com o open-gitea agora usa Connect (sem REST). 108 testes aprovados.
+- **Русский**: можно выбрать один из трёх способов входа (одноразовый код по почте `otp`, код плюс подтверждение QR на телефоне `otp_qr`, только подтверждение QR `qr`); выбор сохраняется после перезапуска. Связь с open-gitea теперь идёт через Connect (без REST). 108 тестов пройдено.
+
 ## GitHub Actions だけで自動バックアップ(GitHub → GitLab) / Backup with GitHub Actions only
 
 VPS やレンタルサーバー以外の GitHub / GitLab のデータは、GitHub Actions で自動バックアップできます。スクリプトと使い方(日本語・英語)は [`docs/github-actions-backup/`](docs/github-actions-backup/README.md)。

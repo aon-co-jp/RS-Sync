@@ -1818,3 +1818,7 @@ HANDOFFエントリを置いてある: [open-redmine](https://github.com/aon-co-
 
 **Paste-ready resume message / 再開用メッセージ**:
 > RS-Syncの「2026-11-18 追記: ログイン方式3択」を読んでください(`PORTING.md`末尾、正本はRUNO `PORTING.md`の「2026-11-18 ログイン方式の横展開」)。(1) 実スマホでQR撮影の通し試験、(2) 本番VPSへ反映(rs-sync・rs-sync-demoを再ビルド・再起動、旧バイナリ退避)、(3) 残りの横展開: RS-Ops(全面REST、先にConnect化が必要)・open-gitea・open-redmine。作業は`origin/main`の新規cloneで行い、分岐した手元クローンで`git pull`しない。/ Read "2026-11-18 Addendum: login modes" at the end of `PORTING.md`. (1) Real phone-camera QR test, (2) deploy to the production VPS (rebuild/restart rs-sync and rs-sync-demo, keep the old binary), (3) remaining rollout: RS-Ops (all REST, needs Connect first), open-gitea, open-redmine. Work in a fresh clone of `origin/main`; never `git pull` in the diverged local clone.
+
+## 2026-11-20 v0.2.0 リリース / Release v0.2.0
+- **日本語**: v0.1.1 以降の33コミット(ログイン方式3択・QR確認ログイン・`login_mode` の永続化・open-gitea連携のConnect化・依存更新)を v0.2.0 として公開。版は `Cargo.toml` の `version`。タグ `v0.2.0` の push で `release.yml` が Linux/Windows の添付を作る。試験108件成功。本番VPSは `b204fdb` 相当で稼働中(バイナリの入れ替えは不要)。
+- **English**: The 33 commits since v0.1.1 (three login modes, QR confirm login, persisted `login_mode`, open-gitea over Connect, dependency updates) are released as v0.2.0. The version lives in `Cargo.toml`; pushing tag `v0.2.0` makes `release.yml` build the Linux/Windows assets. 108 tests pass. Production already runs the `b204fdb` build (no swap needed).
