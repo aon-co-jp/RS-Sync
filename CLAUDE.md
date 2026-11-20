@@ -1822,3 +1822,7 @@ HANDOFFエントリを置いてある: [open-redmine](https://github.com/aon-co-
 ## 2026-11-20 v0.2.0 リリース / Release v0.2.0
 - **日本語**: v0.1.1 以降の33コミット(ログイン方式3択・QR確認ログイン・`login_mode` の永続化・open-gitea連携のConnect化・依存更新)を v0.2.0 として公開。版は `Cargo.toml` の `version`。タグ `v0.2.0` の push で `release.yml` が Linux/Windows の添付を作る。試験108件成功。本番VPSは `b204fdb` 相当で稼働中(バイナリの入れ替えは不要)。
 - **English**: The 33 commits since v0.1.1 (three login modes, QR confirm login, persisted `login_mode`, open-gitea over Connect, dependency updates) are released as v0.2.0. The version lives in `Cargo.toml`; pushing tag `v0.2.0` makes `release.yml` build the Linux/Windows assets. 108 tests pass. Production already runs the `b204fdb` build (no swap needed).
+
+## 2026-11-20 依存の更新(version-control通知) / Dependency update
+- **日本語**: lettre 0.11.23→0.11.24(RUSTSEC-2026-0560〜0565: STARTTLS応答の注入・SMTPコマンド注入・EHLOでのpanic・宛先の取り違え・表示名のCR/LFでのpanic・応答の無制限バッファ)、qrcode 0.14→0.15。コードの変更は不要、`cargo test` 108件成功。
+- **English**: lettre 0.11.23 -> 0.11.24 (RUSTSEC-2026-0560..0565: STARTTLS reply injection, SMTP command injection, EHLO panic, wrong recipient for quoted local parts, CR/LF display-name panic, unbounded reply buffering), qrcode 0.14 -> 0.15. No code changes needed; `cargo test` 108 passed.
