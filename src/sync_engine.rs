@@ -24,21 +24,51 @@ fn state_path(job_id: &str) -> PathBuf {
 
 fn load_state(job_id: &str) -> TwoWayState {
     let p = state_path(job_id);
-    if let Ok(raw) = fs::read_to_string(&p) {
-        serde_json::from_str(&raw).unwrap_or_default()
-    } else {
-        TwoWayState::default()
+    // A missing file means "first run". A file that exists but cannot be
+    // read right now (briefly locked on Windows) is retried, because falling
+    // back to an empty state would turn a normal change into a false CONFLICT.
+    for attempt in 0..10u64 {
+        match fs::read_to_string(&p) {
+            Ok(raw) => return serde_json::from_str(&raw).unwrap_or_default(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(20 * (attempt + 1))),
+        }
     }
+    TwoWayState::default()
 }
 
-fn save_state(job_id: &str, state: &TwoWayState) {
+/// Save the two-way state. Earlier versions ignored write errors
+/// (`let _ = fs::write(..)`). On Windows, antivirus or indexing can briefly
+/// hold the file, the write then failed silently, the next run read an empty
+/// state, and a dest-only change was wrongly flagged as a CONFLICT (the
+/// occasionally failing test `two_way_sync_propagates_dest_only_change_back_to_source`).
+/// Now: write a temp file, rename it into place, retry a few times, and
+/// return the error so the run is reported as failed instead of silently
+/// losing the baseline.
+fn save_state(job_id: &str, state: &TwoWayState) -> Result<()> {
     let p = state_path(job_id);
     if let Some(parent) = p.parent() {
-        let _ = fs::create_dir_all(parent);
+        fs::create_dir_all(parent)?;
     }
-    if let Ok(json) = serde_json::to_string_pretty(state) {
-        let _ = fs::write(p, json);
+    let json = serde_json::to_string_pretty(state)?;
+    let tmp = p.with_extension("json.tmp");
+    let mut last_err = None;
+    for attempt in 0..10u64 {
+        let res = fs::write(&tmp, &json).and_then(|_| fs::rename(&tmp, &p));
+        match res {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last_err = Some(e);
+                std::thread::sleep(std::time::Duration::from_millis(20 * (attempt + 1)));
+            }
+        }
     }
+    let _ = fs::remove_file(&tmp);
+    Err(anyhow!(
+        "could not save sync state {}: {}",
+        p.display(),
+        last_err.map(|e| e.to_string()).unwrap_or_default()
+    ))
 }
 
 fn cache_dir(job_id: &str, repo: &str) -> PathBuf {
@@ -270,7 +300,10 @@ pub fn run_job(job: &mut SyncJob, source: &Account, dest: &Account) -> RunOutcom
         }
     }
 
-    save_state(&job.id, &state);
+    if let Err(e) = save_state(&job.id, &state) {
+        any_failure = true;
+        messages.push(format!("state: FAILED: {e}"));
+    }
 
     RunOutcome {
         success: !any_failure,
@@ -281,6 +314,19 @@ pub fn run_job(job: &mut SyncJob, source: &Account, dest: &Account) -> RunOutcom
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_state_round_trips_and_leaves_no_temp_file() {
+        let job_id = format!("roundtrip-{}", uuid::Uuid::new_v4());
+        let mut st = TwoWayState::default();
+        st.last_synced.insert("repo".into(), "abc123".into());
+        save_state(&job_id, &st).expect("save");
+        let back = load_state(&job_id);
+        assert_eq!(back.last_synced.get("repo").map(String::as_str), Some("abc123"));
+        let p = state_path(&job_id);
+        assert!(!p.with_extension("json.tmp").exists(), "temp file must be renamed away");
+        let _ = std::fs::remove_file(p);
+    }
 
     #[test]
     fn redact_credentials_removes_embedded_token_from_https_url() {
