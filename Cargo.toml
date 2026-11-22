@@ -38,7 +38,7 @@ thiserror = "2"
 # `src/folder_sync.rs`のモジュールdoc参照)。open-web-server側`sftp.rs`が
 # 既に実機検証済みのバージョンに揃える。
 russh = { version = "0.65", default-features = false, features = ["ring", "rsa"] }
-russh-sftp = "3"
+russh-sftp = "4"
 async-trait = "0.1"
 walkdir = "2"
 smb2 = "0.43"
