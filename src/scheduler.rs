@@ -544,7 +544,7 @@ fn execute_folder_job_inner(state: Arc<AppState>, job_id: &str) -> Option<crate:
     };
 
     let started_at = Utc::now();
-    let mut outcome = crate::folder_sync::run_folder_sync(&source, &dest);
+    let mut outcome = crate::folder_sync::run_folder_sync_with(&source, &dest, &job.mirror_options());
     let duration_minutes = ((Utc::now() - started_at).num_seconds().max(0) as f64 / 60.0).ceil() as i64;
     if let Some(note) = auto_widen_schedule_if_too_slow(&mut job.schedule, duration_minutes) {
         outcome.message = format!("{} [{note}]", outcome.message);

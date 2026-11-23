@@ -715,6 +715,12 @@ struct NewFolderJobReq {
     source_endpoint_id: String,
     dest_endpoint_id: String,
     schedule: Schedule,
+    #[serde(default)]
+    mirror_delete: bool,
+    #[serde(default)]
+    mirror_dry_run: bool,
+    #[serde(default)]
+    max_deletes: usize,
 }
 
 #[handler]
@@ -732,6 +738,9 @@ fn create_folder_job(state: Data<&Arc<AppState>>, Json(req): Json<NewFolderJobRe
         last_run_status: None,
         initial_realtime_poll_minutes,
         google_synced: false,
+        mirror_delete: req.mirror_delete,
+        mirror_dry_run: req.mirror_dry_run,
+        max_deletes: req.max_deletes,
     };
     {
         let mut store = state.store.lock().unwrap();

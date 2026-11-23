@@ -89,6 +89,34 @@ pub struct FolderSyncJob {
     /// 解除通知の対象判定用フラグ)。
     #[serde(default)]
     pub google_synced: bool,
+    /// 削除の伝播(ミラー)。**既定オフ**。オンのとき、宛先にだけあるファイルを
+    /// 削除する(一方向: 元→宛先)。誤削除対策は`MirrorOptions`参照。
+    #[serde(default)]
+    pub mirror_delete: bool,
+    /// trueなら削除せず「削除予定」を報告するだけ(ドライラン)。
+    #[serde(default)]
+    pub mirror_dry_run: bool,
+    /// 1回の実行で削除してよい最大件数(0なら既定の`DEFAULT_MAX_DELETES`)。
+    #[serde(default)]
+    pub max_deletes: usize,
+}
+
+/// 1回の実行での削除件数の既定上限。
+pub const DEFAULT_MAX_DELETES: usize = 20;
+
+/// 削除の伝播の設定。既定は**すべてオフ**(従来どおり削除しない)。
+#[derive(Debug, Clone, Default)]
+pub struct MirrorOptions {
+    pub delete: bool,
+    pub dry_run: bool,
+    /// 0なら`DEFAULT_MAX_DELETES`。
+    pub max_deletes: usize,
+}
+
+impl FolderSyncJob {
+    pub fn mirror_options(&self) -> MirrorOptions {
+        MirrorOptions { delete: self.mirror_delete, dry_run: self.mirror_dry_run, max_deletes: self.max_deletes }
+    }
 }
 
 /// API応答専用ビュー。`password`/秘密鍵パスは一覧に出さない
@@ -480,6 +508,13 @@ pub struct FolderRunOutcome {
 /// 一方向フォルダ同期を実行する。宛先に無い、またはサイズが異なる
 /// ファイルのみをコピーする(上記モジュールdoc「正直な開示」参照)。
 pub fn run_folder_sync(source: &FolderEndpoint, dest: &FolderEndpoint) -> FolderRunOutcome {
+    run_folder_sync_with(source, dest, &MirrorOptions::default())
+}
+
+/// `run_folder_sync`に削除の伝播(ミラー)を足したもの。安全策:
+/// 既定オフ/ドライラン/上限超過なら1件も削除しない/元が空で宛先に有るときは
+/// 削除しない(マウント外れ等の事故対策)。
+pub fn run_folder_sync_with(source: &FolderEndpoint, dest: &FolderEndpoint, opts: &MirrorOptions) -> FolderRunOutcome {
     let outcome = (|| -> Result<String> {
         let src_backend = backend_for(source).context("connect to source")?;
         let dst_backend = backend_for(dest).context("connect to destination")?;
@@ -496,12 +531,43 @@ pub fn run_folder_sync(source: &FolderEndpoint, dest: &FolderEndpoint) -> Folder
             dst_backend.write_file(&meta.rel_path, &data)?;
             copied += 1;
         }
-        Ok(format!("{copied} file(s) copied, {skipped} unchanged (skipped), {} total", files.len()))
+        let mut msg = format!("{copied} file(s) copied, {skipped} unchanged (skipped), {} total", files.len());
+        if opts.delete {
+            msg.push_str(&mirror_delete_step(&files, dst_backend.as_ref(), opts)?);
+        }
+        Ok(msg)
     })();
     match outcome {
         Ok(message) => FolderRunOutcome { success: true, message },
         Err(e) => FolderRunOutcome { success: false, message: format!("{e:#}") },
     }
+}
+
+/// 宛先にだけあるファイルを削除する(または報告する)。報告文を返す。
+fn mirror_delete_step(source_files: &[FileMeta], dst: &dyn FolderBackend, opts: &MirrorOptions) -> Result<String> {
+    let src: std::collections::HashSet<&Path> = source_files.iter().map(|m| m.rel_path.as_path()).collect();
+    let dest_files = dst.list_files().context("list destination files")?;
+    let extra: Vec<&FileMeta> = dest_files.iter().filter(|m| !src.contains(m.rel_path.as_path())).collect();
+    if extra.is_empty() {
+        return Ok(", 0 deleted".to_string());
+    }
+    if source_files.is_empty() {
+        return Ok(format!(", mirror-delete SKIPPED: source is empty but destination has {} file(s) (refusing to wipe)", extra.len()));
+    }
+    let limit = if opts.max_deletes == 0 { DEFAULT_MAX_DELETES } else { opts.max_deletes };
+    if extra.len() > limit {
+        return Ok(format!(", mirror-delete SKIPPED: {} file(s) to delete exceeds the limit of {limit} (nothing deleted)", extra.len()));
+    }
+    if opts.dry_run {
+        let names: Vec<String> = extra.iter().map(|m| m.rel_path.display().to_string()).collect();
+        return Ok(format!(", dry-run: would delete {} file(s): {}", extra.len(), names.join(", ")));
+    }
+    let mut deleted = 0usize;
+    for m in &extra {
+        dst.remove_file(&m.rel_path)?;
+        deleted += 1;
+    }
+    Ok(format!(", {deleted} deleted"))
 }
 
 #[cfg(test)]
@@ -618,6 +684,65 @@ mod tests {
         assert_eq!(content, b"hello from rs-sync local-to-sftp test");
     }
 
+    fn mirror_setup() -> (tempfile::TempDir, tempfile::TempDir) {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("keep.txt"), b"k").unwrap();
+        std::fs::write(dst.path().join("keep.txt"), b"k").unwrap();
+        std::fs::write(dst.path().join("stale.txt"), b"s").unwrap();
+        (src, dst)
+    }
+
+    #[test]
+    fn mirror_delete_is_off_by_default() {
+        let (src, dst) = mirror_setup();
+        let o = run_folder_sync(&local_endpoint(src.path()), &local_endpoint(dst.path()));
+        assert!(o.success, "{}", o.message);
+        assert!(dst.path().join("stale.txt").exists());
+    }
+
+    #[test]
+    fn mirror_delete_removes_only_dest_only_files() {
+        let (src, dst) = mirror_setup();
+        let opts = MirrorOptions { delete: true, ..Default::default() };
+        let o = run_folder_sync_with(&local_endpoint(src.path()), &local_endpoint(dst.path()), &opts);
+        assert!(o.success, "{}", o.message);
+        assert!(o.message.contains("1 deleted"), "{}", o.message);
+        assert!(!dst.path().join("stale.txt").exists());
+        assert!(dst.path().join("keep.txt").exists());
+        assert!(src.path().join("keep.txt").exists());
+    }
+
+    #[test]
+    fn mirror_dry_run_deletes_nothing_but_reports() {
+        let (src, dst) = mirror_setup();
+        let opts = MirrorOptions { delete: true, dry_run: true, max_deletes: 0 };
+        let o = run_folder_sync_with(&local_endpoint(src.path()), &local_endpoint(dst.path()), &opts);
+        assert!(o.message.contains("would delete 1") && o.message.contains("stale.txt"), "{}", o.message);
+        assert!(dst.path().join("stale.txt").exists());
+    }
+
+    #[test]
+    fn mirror_delete_over_limit_deletes_nothing() {
+        let (src, dst) = mirror_setup();
+        std::fs::write(dst.path().join("stale2.txt"), b"s").unwrap();
+        let opts = MirrorOptions { delete: true, dry_run: false, max_deletes: 1 };
+        let o = run_folder_sync_with(&local_endpoint(src.path()), &local_endpoint(dst.path()), &opts);
+        assert!(o.message.contains("SKIPPED") && o.message.contains("limit"), "{}", o.message);
+        assert!(dst.path().join("stale.txt").exists() && dst.path().join("stale2.txt").exists());
+    }
+
+    #[test]
+    fn mirror_delete_refuses_to_wipe_when_source_is_empty() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        std::fs::write(dst.path().join("a.txt"), b"a").unwrap();
+        let opts = MirrorOptions { delete: true, ..Default::default() };
+        let o = run_folder_sync_with(&local_endpoint(src.path()), &local_endpoint(dst.path()), &opts);
+        assert!(o.message.contains("SKIPPED") && o.message.contains("empty"), "{}", o.message);
+        assert!(dst.path().join("a.txt").exists());
+    }
+
     #[test]
     fn local_backend_remove_file_deletes_and_reports_missing() {
         let dir = tempfile::tempdir().unwrap();
@@ -627,6 +752,47 @@ mod tests {
         b.remove_file(Path::new("a.txt")).unwrap();
         assert!(!dir.path().join("a.txt").exists());
         assert!(b.remove_file(Path::new("a.txt")).is_err());
+    }
+
+    /// 実SFTPでの削除の伝播(ミラー)の通し(`--ignored`、環境変数は往復試験と同じ)。
+    /// ドライラン→削除→宛先に残るべきものが残ることまで確認する。
+    #[test]
+    #[ignore]
+    fn sftp_mirror_delete_against_a_real_server() {
+        let ep = FolderEndpoint {
+            id: "r".into(), name: "real".into(), kind: FolderEndpointKind::Sftp,
+            path: std::env::var("RS_SYNC_TEST_SFTP_REMOTE_PATH").unwrap(),
+            host: std::env::var("RS_SYNC_TEST_SFTP_HOST").unwrap(),
+            port: std::env::var("RS_SYNC_TEST_SFTP_PORT").unwrap_or_else(|_| "22".into()).parse().unwrap(),
+            username: std::env::var("RS_SYNC_TEST_SFTP_USER").unwrap(),
+            password: String::new(),
+            private_key_path: std::env::var("RS_SYNC_TEST_SFTP_KEY_PATH").unwrap(),
+            share: String::new(),
+        };
+        let src = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("keep.txt"), b"k").unwrap();
+        let b = backend_for(&ep).unwrap();
+        b.write_file(Path::new("stale.txt"), b"s").unwrap();
+        let src_ep = local_endpoint(src.path());
+
+        // 既定(オフ)では消えない
+        let o = run_folder_sync(&src_ep, &ep);
+        assert!(o.success, "{}", o.message);
+        assert_eq!(b.stat(Path::new("stale.txt")), Some(1));
+
+        // ドライランでも消えない
+        let dry = MirrorOptions { delete: true, dry_run: true, max_deletes: 0 };
+        let o = run_folder_sync_with(&src_ep, &ep, &dry);
+        assert!(o.message.contains("would delete 1"), "{}", o.message);
+        assert_eq!(b.stat(Path::new("stale.txt")), Some(1));
+
+        // 本番: 宛先にだけあるファイルが消え、元にもあるファイルは残る
+        let real = MirrorOptions { delete: true, ..Default::default() };
+        let o = run_folder_sync_with(&src_ep, &ep, &real);
+        assert!(o.success && o.message.contains("1 deleted"), "{}", o.message);
+        assert_eq!(b.stat(Path::new("stale.txt")), None);
+        assert_eq!(b.stat(Path::new("keep.txt")), Some(1));
+        b.remove_file(Path::new("keep.txt")).unwrap();
     }
 
     /// 実SFTPでの削除(`--ignored`、環境変数は往復試験と同じ)。
