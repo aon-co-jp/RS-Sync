@@ -136,6 +136,10 @@ trait FolderBackend {
     /// 宛先側で「このファイルは既にあるか、サイズが違うか」を判定する
     /// ための軽量メタデータ取得(存在しなければ`None`)。
     fn stat(&self, rel_path: &Path) -> Option<u64>;
+    /// ファイルを1つ削除する(2026-11-23追加。既定は未対応エラー)。
+    fn remove_file(&self, _rel_path: &Path) -> Result<()> {
+        Err(anyhow!("remove_file is not supported by this backend"))
+    }
 }
 
 struct LocalBackend {
@@ -143,6 +147,10 @@ struct LocalBackend {
 }
 
 impl FolderBackend for LocalBackend {
+    fn remove_file(&self, rel_path: &Path) -> Result<()> {
+        std::fs::remove_file(self.base.join(rel_path)).with_context(|| format!("remove {}", rel_path.display()))
+    }
+
     fn list_files(&self) -> Result<Vec<FileMeta>> {
         let mut out = Vec::new();
         for entry in walkdir::WalkDir::new(&self.base).into_iter().filter_map(|e| e.ok()) {
@@ -294,6 +302,11 @@ impl SftpBackend {
 }
 
 impl FolderBackend for SftpBackend {
+    fn remove_file(&self, rel_path: &Path) -> Result<()> {
+        self.runtime.block_on(self.sftp.remove_file(self.remote_path(rel_path)))?;
+        Ok(())
+    }
+
     fn list_files(&self) -> Result<Vec<FileMeta>> {
         let mut out = Vec::new();
         self.walk(&self.base, &mut out)?;
@@ -603,6 +616,38 @@ mod tests {
         assert!(down.success, "download failed: {}", down.message);
         let content = std::fs::read(download_dir.path().join("roundtrip.txt")).unwrap();
         assert_eq!(content, b"hello from rs-sync local-to-sftp test");
+    }
+
+    #[test]
+    fn local_backend_remove_file_deletes_and_reports_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"x").unwrap();
+        let ep = local_endpoint(dir.path());
+        let b = backend_for(&ep).unwrap();
+        b.remove_file(Path::new("a.txt")).unwrap();
+        assert!(!dir.path().join("a.txt").exists());
+        assert!(b.remove_file(Path::new("a.txt")).is_err());
+    }
+
+    /// 実SFTPでの削除(`--ignored`、環境変数は往復試験と同じ)。
+    #[test]
+    #[ignore]
+    fn sftp_remove_file_against_a_real_server() {
+        let ep = FolderEndpoint {
+            id: "r".into(), name: "real".into(), kind: FolderEndpointKind::Sftp,
+            path: std::env::var("RS_SYNC_TEST_SFTP_REMOTE_PATH").unwrap(),
+            host: std::env::var("RS_SYNC_TEST_SFTP_HOST").unwrap(),
+            port: std::env::var("RS_SYNC_TEST_SFTP_PORT").unwrap_or_else(|_| "22".into()).parse().unwrap(),
+            username: std::env::var("RS_SYNC_TEST_SFTP_USER").unwrap(),
+            password: String::new(),
+            private_key_path: std::env::var("RS_SYNC_TEST_SFTP_KEY_PATH").unwrap(),
+            share: String::new(),
+        };
+        let b = backend_for(&ep).unwrap();
+        b.write_file(Path::new("to-delete.txt"), b"bye").unwrap();
+        assert_eq!(b.stat(Path::new("to-delete.txt")), Some(3));
+        b.remove_file(Path::new("to-delete.txt")).unwrap();
+        assert_eq!(b.stat(Path::new("to-delete.txt")), None);
     }
 
     /// 2026-08-03追記: 実WiFiルーター(TP-Link AX6600、USBストレージ+
