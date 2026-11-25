@@ -1438,6 +1438,7 @@ fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::End
         .with(ReadOnlyGuard { read_only: auth_state.read_only })
         .data(state.clone())
         .data(auth_state.clone());
+    let api = std::sync::Arc::new(poem::EndpointExt::boxed(api));
 
     // 公開される入口はConnectの単純呼び出し(POST /rs_sync.v1.Sync/<Method>)のみ。
     // 例外: GoogleのOAuthリダイレクト(規格により固定のGET)、ヘルスチェック、静的画面。
@@ -1447,7 +1448,9 @@ fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::End
         .at("/healthz", get(healthz))
         .at("/healthz/scheduler", get(healthz_scheduler))
         .at("/api/auth/google/callback", get(google_calendar_callback))
-        .at("/rs_sync.v1.Sync/:method", post(connect::ConnectEndpoint { inner: api }))
+        .at("/rs_sync.v1.Sync/:method", post(connect::ConnectEndpoint { inner: api.clone() }))
+        // Versionless: 版なしの別名(`/rs_sync.Sync/<Method>`)でも同じ呼び出しができる。`.v1` は呼び出し側を壊さないため当面残す。
+        .at("/rs_sync.Sync/:method", post(connect::ConnectEndpoint { inner: api }))
         .data(state)
         .data(auth_state)
 }
@@ -1537,6 +1540,22 @@ mod tests {
             read_only: false,
         });
         (state, auth_state)
+    }
+
+    /// Versionless: 版なしの名前(`/rs_sync.Sync/...`)でも版つきと同じ結果になる。
+    #[tokio::test]
+    async fn versionless_alias_behaves_like_v1() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, auth_state) = make_state(&tmp, true);
+        let client = TestClient::new(build_app(state, auth_state));
+        let a = client.post("/rs_sync.v1.Sync/ListAccounts").send().await;
+        let b = client.post("/rs_sync.Sync/ListAccounts").send().await;
+        a.assert_status(StatusCode::UNAUTHORIZED);
+        b.assert_status(StatusCode::UNAUTHORIZED);
+        let c = client.post("/rs_sync.Sync/GetLoginMode").body_json(&serde_json::json!({})).send().await;
+        c.assert_status_is_ok();
+        let d = client.post("/rs_sync.Sync/NoSuchMethod").body_json(&serde_json::json!({})).send().await;
+        d.assert_status(StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
