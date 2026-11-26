@@ -1,6 +1,6 @@
 //! Connect の単純呼び出し層(2026-11-04、REST全廃方針)。
 //!
-//! 公開される入口は `POST /rs_sync.v1.Sync/<Method>`(`content-type: application/json`、
+//! 公開される入口は `POST /rs_sync.Sync/<Method>`(`content-type: application/json`、
 //! 本文はJSONオブジェクト)のみ。各メソッドは内部ルーター(従来のハンドラ群、外部には
 //! 公開しない)の呼び出しへ変換する。`id`・`repo` は本文のフィールドで渡す。
 //! エラーは `{"code","message"}`。本文は上限(サイズ・深さ・重複キー)つきで検査する。
@@ -10,9 +10,7 @@ use poem::{Body, Endpoint, IntoResponse, Request, Response, Result as PoemResult
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use std::fmt;
 
-pub const SERVICE: &str = "rs_sync.v1.Sync";
-/// 版なしの別名(Versionless)。内部では `SERVICE` に読み替える。
-pub const SERVICE_ALIAS: &str = "rs_sync.Sync";
+pub const SERVICE: &str = "rs_sync.Sync";
 const MAX_BODY: usize = 1024 * 1024;
 const MAX_DEPTH: usize = 32;
 
@@ -181,10 +179,7 @@ impl<E: Endpoint> Endpoint for ConnectEndpoint<E> {
     type Output = Response;
     async fn call(&self, mut req: Request) -> PoemResult<Response> {
         let name = req.uri().path().trim_start_matches('/').to_string();
-        let Some(method) = name
-            .strip_prefix(&format!("{SERVICE}/"))
-            .or_else(|| name.strip_prefix(&format!("{SERVICE_ALIAS}/")))
-        else {
+        let Some(method) = name.strip_prefix(&format!("{SERVICE}/")) else {
             return Ok(connect_error(StatusCode::NOT_FOUND, "unknown service"));
         };
         let Some(&(_, http, tmpl)) = METHODS.iter().find(|(n, _, _)| *n == method) else {
@@ -207,7 +202,7 @@ impl<E: Endpoint> Endpoint for ConnectEndpoint<E> {
             Ok(o) => o,
             Err(e) => return Ok(connect_error(StatusCode::BAD_REQUEST, &e)),
         };
-        // 内部ルーターもConnect形式(`/rs_sync.v1.Sync/<Method>[/<id>[/<repo>]]`)で登録している。
+        // 内部ルーターもConnect形式(`/rs_sync.Sync/<Method>[/<id>[/<repo>]]`)で登録している。
         let mut path = format!("/{SERVICE}/{method}");
         for seg in tmpl.split('/').filter(|s| s.starts_with(':')) {
             path.push('/');
