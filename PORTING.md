@@ -403,3 +403,7 @@ cargo test --test sync_integration -- --test-threads=1  # 実git bareリポジ�
   - Demo: `GetLoginMode` 200; `ListAccounts` 200.
   - Old `/api/accounts` 404; public URL 200; `/healthz` 200; error log 0; no missing libraries.
 - The production deploy is done. Still open: a QR login with a real phone camera and an `otp_qr` run with real mail (both need a person).
+
+## 2026-11-26 open-gitea 呼び出しを版なしへ / open-gitea calls now versionless
+**日本語**: 連携先 open-gitea の `.v1` 削除に合わせ、`src/provider.rs` を `POST /open_gitea.Gitea/{ListRepos,CreateRepo}` へ変更し、本番の `rs-sync`・`rs-sync-demo` を入れ替え済み(旧版 `rs-sync.before-v1del-20261126`、healthz 200・エラー0)。実際の同期の通し確認は未了(トークンが要る)。再開は open-gitea の PORTING.md 末尾「2026-11-26」から。
+**English**: To match open-gitea's `.v1` removal, `src/provider.rs` now calls `POST /open_gitea.Gitea/{ListRepos,CreateRepo}`, and production `rs-sync` and `rs-sync-demo` were swapped (old binary `rs-sync.before-v1del-20261126`, healthz 200, 0 errors). A real sync run is not yet verified (needs tokens). Resume from the "2026-11-26" section at the end of open-gitea's PORTING.md.
