@@ -79,7 +79,7 @@
     btn.classList.add("hidden");
     statusEl.className = "status";
     statusEl.textContent = "Confirming... / 確認中...";
-    fetch("/rs_sync.v1.Sync/QrLoginConfirm", {
+    fetch("/rs_sync.Sync/QrLoginConfirm", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: id }),
@@ -102,7 +102,7 @@
       });
   }
 
-  fetch("/rs_sync.v1.Sync/QrLoginWhoami", {
+  fetch("/rs_sync.Sync/QrLoginWhoami", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ id: id }),

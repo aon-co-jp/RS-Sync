@@ -326,7 +326,7 @@ cargo test --test sync_integration -- --test-threads=1  # 実git bareリポジ�
 ## 2026-11-18 追記: ログイン方式3択(otp / otp_qr / qr)とQR確認ログイン / Login modes and QR-confirm login
 
 **日本語**: 4択ログイン方式の横展開(RS-Sync分)を実装した。`otp`(既定、メールOTPのみ)・`otp_qr`(メールOTP+QR撮影=2段階認証)・`qr`(QR撮影のみ)。「パスワード無し」は、同期先の資格情報を扱う管理アプリのため**意図的に実装しない**。QRは秘密鍵・公開鍵を使わず、3分・1回限りのランダムトークンを含むURLだけを埋め込む(撮影端末でページが開くと自動で確認され、ボタン操作は不要)。
-- 変更: `src/auth.rs`(QRセッション・`login_mode`、既定は再起動でotpへ戻る安全側)、`src/main.rs`(`VerifyOtp`は`otp_qr`でトークンでなくQRを返す、`QrLoginStart/Confirm/Status/Whoami/Finish`、`GetLoginMode`、`SetLoginMode`、`/qr-confirm.html`)、`src/connect.rs`(メソッド表に7件追加)、`src/totp.rs`(`text_qr_svg`)、`static/index.html`(ログイン画面のQR表示・ポーリング、設定パネルの方式選択)、`static/qr-confirm.html`(新規)。公開は引き続きConnect(`POST /rs_sync.v1.Sync/<Method>`)のみで、RESTは追加していない。
+- 変更: `src/auth.rs`(QRセッション・`login_mode`、既定は再起動でotpへ戻る安全側)、`src/main.rs`(`VerifyOtp`は`otp_qr`でトークンでなくQRを返す、`QrLoginStart/Confirm/Status/Whoami/Finish`、`GetLoginMode`、`SetLoginMode`、`/qr-confirm.html`)、`src/connect.rs`(メソッド表に7件追加)、`src/totp.rs`(`text_qr_svg`)、`static/index.html`(ログイン画面のQR表示・ポーリング、設定パネルの方式選択)、`static/qr-confirm.html`(新規)。公開は引き続きConnect(`POST /rs_sync.Sync/<Method>`)のみで、RESTは追加していない。
 - 締め出し防止: `qr`はメールOTPを無効にするため、認証アプリ(TOTP)が有効なときだけ選べ、`QrLoginStart`も登録メールを名乗り、かつTOTP有効のときだけQRを出す。`SetLoginMode`はログイン必須。
 - **正直な開示**: `qr`単独は秘密を持たないため弱い(画面を見た人が確認URLを開ければ通る)。通常は`otp_qr`を推奨(画面にも明記)。
 - 確認済み: `cargo test --locked`全通過(auth 2件・結合4件を追加、既存含め失敗0)。実ブラウザで`qr`モードを通し(QR表示→別タブで確認URLを開く→元のタブが自動でログイン状態)。
@@ -334,7 +334,7 @@ cargo test --test sync_integration -- --test-threads=1  # 実git bareリポジ�
 - 注意: ローカルの`F:\runo\repository\RS-Sync`は`origin/main`と履歴が分岐している(ahead 57 / behind 78)ため、`git pull`せず、`F:\runo\repository\_work\RS-Sync`(`origin/main`の新規clone)で作業した。
 
 **English**: The login-mode rollout reached RS-Sync: `otp` (default, email OTP only), `otp_qr` (email OTP + QR scan = real 2-step) and `qr` (QR scan only). "No password" is **intentionally not implemented** because this admin app holds sync credentials. The QR uses no public/private keys; it only encodes a URL with a random token that lives 3 minutes and works once (the scanning device confirms automatically when the page opens, no button press).
-- Changed: `src/auth.rs` (QR sessions, `login_mode`; resets to `otp` on restart, the safe side), `src/main.rs` (`VerifyOtp` returns a QR instead of a token in `otp_qr`; `QrLoginStart/Confirm/Status/Whoami/Finish`, `GetLoginMode`, `SetLoginMode`, `/qr-confirm.html`), `src/connect.rs` (7 methods added), `src/totp.rs` (`text_qr_svg`), `static/index.html` (QR display and polling on the login screen, mode selector in settings), `static/qr-confirm.html` (new). Still Connect-only (`POST /rs_sync.v1.Sync/<Method>`); no REST added.
+- Changed: `src/auth.rs` (QR sessions, `login_mode`; resets to `otp` on restart, the safe side), `src/main.rs` (`VerifyOtp` returns a QR instead of a token in `otp_qr`; `QrLoginStart/Confirm/Status/Whoami/Finish`, `GetLoginMode`, `SetLoginMode`, `/qr-confirm.html`), `src/connect.rs` (7 methods added), `src/totp.rs` (`text_qr_svg`), `static/index.html` (QR display and polling on the login screen, mode selector in settings), `static/qr-confirm.html` (new). Still Connect-only (`POST /rs_sync.Sync/<Method>`); no REST added.
 - Lock-out guard: `qr` disables email OTP, so it can be selected only while the authenticator app (TOTP) is enabled, and `QrLoginStart` shows a QR only for a registered email with TOTP enabled. `SetLoginMode` requires login.
 - **Honest disclosure**: `qr` alone holds no secret and is weak (anyone who sees the screen and opens the URL gets in). `otp_qr` is recommended (also stated in the UI).
 - Verified: `cargo test --locked` all green (2 auth + 4 integration tests added, 0 failures). In a real browser the `qr` mode worked end to end (QR shown, confirm URL opened in another tab, the first tab logged in by itself).
@@ -407,3 +407,17 @@ cargo test --test sync_integration -- --test-threads=1  # 実git bareリポジ�
 ## 2026-11-26 open-gitea 呼び出しを版なしへ / open-gitea calls now versionless
 **日本語**: 連携先 open-gitea の `.v1` 削除に合わせ、`src/provider.rs` を `POST /open_gitea.Gitea/{ListRepos,CreateRepo}` へ変更し、本番の `rs-sync`・`rs-sync-demo` を入れ替え済み(旧版 `rs-sync.before-v1del-20261126`、healthz 200・エラー0)。実際の同期の通し確認は未了(トークンが要る)。再開は open-gitea の PORTING.md 末尾「2026-11-26」から。
 **English**: To match open-gitea's `.v1` removal, `src/provider.rs` now calls `POST /open_gitea.Gitea/{ListRepos,CreateRepo}`, and production `rs-sync` and `rs-sync-demo` were swapped (old binary `rs-sync.before-v1del-20261126`, healthz 200, 0 errors). A real sync run is not yet verified (needs tokens). Resume from the "2026-11-26" section at the end of open-gitea's PORTING.md.
+
+## 2026-11-26 `.v1` 即削除・版なし名へ統一 / `.v1` removed immediately, versionless names only
+
+### 日本語
+- ユーザー指示(2026-11-26)により、自前APIの版つき名(`rs_sync.v1.…`)は**猶予なしで削除**し、版なし名(`rs_sync.Sync/<Method>`)だけにした。旧名は404を返す(試験 `v1_names_are_gone_versionless_works` で確認)。画面・試験・文書・メール文面の呼び出しも版なし名へ書き換え済み。
+- 第三者の規格名(`grpc.health.v1` 等)は対象外で触っていない。
+- 本番(VPS)への反映・実測は、このコミットの後の記録(下の「本番反映」行)を参照。反映前は旧名が本番で動いている。
+- **再開用メッセージ(別アカウントでそのまま貼り付け)**: 前の続きです。`RS-Sync` の README/CLAUDE/PORTING の「2026-11-26 `.v1` 即削除」を読み、(1)`vps-build.sh`(Ubuntu-24.04)でビルドし `check-glibc.sh` を通す、(2)VPSの該当サービスを `*.before-v1del-20261126` にバックアップして入れ替える、(3)新名200/401・旧名404・`/healthz` 200・エラーログ0を実測、(4)結果をこの節に追記してpush。VPSのcloneは `git pull` せず fetch+reset。関連リポジトリ: RS-EC・RS-Blog・RS-Sync(RS-Opsは必要なら)・`runo`。秘密は出さない、VPSでビルドしない、新しいRESTは作らない。
+
+### English
+- Per the user's instruction (2026-11-26), the versioned names of our own API (`rs_sync.v1.…`) were **deleted immediately with no grace period**; only the versionless names (`rs_sync.Sync/<Method>`) remain. Old names return 404 (test `v1_names_are_gone_versionless_works`). Callers in the UI, tests, docs and mail text were rewritten to the versionless names.
+- Third-party standard names (`grpc.health.v1` etc.) are out of scope and untouched.
+- For the production swap and measurements see the later "production" note below; before that, production still serves the old names.
+- **Resume message (paste as is on another account)**: Continuing from before. Read "2026-11-26 `.v1` removed immediately" in the README/CLAUDE/PORTING of `RS-Sync`, then (1) build with `vps-build.sh` (Ubuntu-24.04) and pass `check-glibc.sh`, (2) back up the VPS service as `*.before-v1del-20261126` and swap it, (3) measure new names 200/401, old names 404, `/healthz` 200, error log 0, (4) append the result to this section and push. Never `git pull` VPS clones (fetch+reset). Related repos: RS-EC, RS-Blog, RS-Sync (RS-Ops if needed), `runo`. Never print secrets, never build on the VPS, no new REST.

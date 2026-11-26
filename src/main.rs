@@ -1377,70 +1377,70 @@ impl<E: Endpoint> Endpoint for ReadOnlyGuardEndpoint<E> {
 
 fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::Endpoint {
     let protected = Route::new()
-        .at("/rs_sync.v1.Sync/ListAccounts", get(list_accounts))
-        .at("/rs_sync.v1.Sync/CreateAccount", post(create_account))
-        .at("/rs_sync.v1.Sync/DeleteAccount/:id", poem::delete(delete_account))
-        .at("/rs_sync.v1.Sync/UpdateAccountToken/:id", poem::put(update_account_token))
-        .at("/rs_sync.v1.Sync/ListJobs", get(list_jobs))
-        .at("/rs_sync.v1.Sync/CreateJob", post(create_job))
-        .at("/rs_sync.v1.Sync/DeleteJob/:id", poem::delete(delete_job))
-        .at("/rs_sync.v1.Sync/UpdateJobSchedule/:id", poem::put(update_job_schedule))
-        .at("/rs_sync.v1.Sync/RunJob/:id", post(run_job_now))
-        .at("/rs_sync.v1.Sync/ResolveConflict/:id/:repo", post(resolve_conflict))
-        .at("/rs_sync.v1.Sync/ListLogs", get(list_logs))
-        .at("/rs_sync.v1.Sync/GetLogEmailSettings", get(get_log_email_settings))
-        .at("/rs_sync.v1.Sync/UpdateLogEmailSettings", poem::put(update_log_email_settings))
-        .at("/rs_sync.v1.Sync/ListFolderEndpoints", get(list_folder_endpoints))
-        .at("/rs_sync.v1.Sync/CreateFolderEndpoint", post(create_folder_endpoint))
-        .at("/rs_sync.v1.Sync/DeleteFolderEndpoint/:id", poem::delete(delete_folder_endpoint))
-        .at("/rs_sync.v1.Sync/UpdateFolderEndpointCredentials/:id", poem::put(update_folder_endpoint_credentials))
-        .at("/rs_sync.v1.Sync/ListFolderJobs", get(list_folder_jobs))
-        .at("/rs_sync.v1.Sync/CreateFolderJob", post(create_folder_job))
-        .at("/rs_sync.v1.Sync/DeleteFolderJob/:id", poem::delete(delete_folder_job))
-        .at("/rs_sync.v1.Sync/UpdateFolderJobSchedule/:id", poem::put(update_folder_job_schedule))
-        .at("/rs_sync.v1.Sync/RunFolderJob/:id", post(run_folder_job_now))
-        .at("/rs_sync.v1.Sync/SyncFolderJobToGoogleCalendar/:id", post(sync_folder_job_to_google_calendar))
-        .at("/rs_sync.v1.Sync/SyncJobToGoogleCalendar/:id", post(sync_job_to_google_calendar))
-        .at("/rs_sync.v1.Sync/GetGoogleStatus", get(google_calendar_status))
-        .at("/rs_sync.v1.Sync/GetGoogleLoginUrl", get(google_calendar_login))
-        .at("/rs_sync.v1.Sync/GetGoogleCredentials", get(get_google_credentials))
-        .at("/rs_sync.v1.Sync/UpdateGoogleCredentials", poem::put(update_google_credentials))
-        .at("/rs_sync.v1.Sync/GetAdminEmail", get(get_admin_email))
-        .at("/rs_sync.v1.Sync/UpdateAdminEmail", poem::put(update_admin_email))
-        .at("/rs_sync.v1.Sync/GetBackupEmail", get(get_backup_email))
-        .at("/rs_sync.v1.Sync/UpdateBackupEmail", poem::put(update_backup_email))
-        .at("/rs_sync.v1.Sync/GetAdminPhone", get(get_admin_phone))
-        .at("/rs_sync.v1.Sync/UpdateAdminPhone", poem::put(update_admin_phone))
-        .at("/rs_sync.v1.Sync/SetupTotp", post(totp_setup))
-        .at("/rs_sync.v1.Sync/EnableTotp", post(totp_enable))
-        .at("/rs_sync.v1.Sync/DisableTotp", post(totp_disable))
-        .at("/rs_sync.v1.Sync/GetTotpStatus", get(totp_status))
-        .at("/rs_sync.v1.Sync/GetInstallerSyncStatus", get(installer_sync_status))
-        .at("/rs_sync.v1.Sync/UpdateInstallerSyncConfig", poem::put(update_installer_sync_config))
-        .at("/rs_sync.v1.Sync/RunInstallerSync", post(run_installer_sync_now))
-        .at("/rs_sync.v1.Sync/SetLoginMode", poem::put(set_login_mode))
+        .at("/rs_sync.Sync/ListAccounts", get(list_accounts))
+        .at("/rs_sync.Sync/CreateAccount", post(create_account))
+        .at("/rs_sync.Sync/DeleteAccount/:id", poem::delete(delete_account))
+        .at("/rs_sync.Sync/UpdateAccountToken/:id", poem::put(update_account_token))
+        .at("/rs_sync.Sync/ListJobs", get(list_jobs))
+        .at("/rs_sync.Sync/CreateJob", post(create_job))
+        .at("/rs_sync.Sync/DeleteJob/:id", poem::delete(delete_job))
+        .at("/rs_sync.Sync/UpdateJobSchedule/:id", poem::put(update_job_schedule))
+        .at("/rs_sync.Sync/RunJob/:id", post(run_job_now))
+        .at("/rs_sync.Sync/ResolveConflict/:id/:repo", post(resolve_conflict))
+        .at("/rs_sync.Sync/ListLogs", get(list_logs))
+        .at("/rs_sync.Sync/GetLogEmailSettings", get(get_log_email_settings))
+        .at("/rs_sync.Sync/UpdateLogEmailSettings", poem::put(update_log_email_settings))
+        .at("/rs_sync.Sync/ListFolderEndpoints", get(list_folder_endpoints))
+        .at("/rs_sync.Sync/CreateFolderEndpoint", post(create_folder_endpoint))
+        .at("/rs_sync.Sync/DeleteFolderEndpoint/:id", poem::delete(delete_folder_endpoint))
+        .at("/rs_sync.Sync/UpdateFolderEndpointCredentials/:id", poem::put(update_folder_endpoint_credentials))
+        .at("/rs_sync.Sync/ListFolderJobs", get(list_folder_jobs))
+        .at("/rs_sync.Sync/CreateFolderJob", post(create_folder_job))
+        .at("/rs_sync.Sync/DeleteFolderJob/:id", poem::delete(delete_folder_job))
+        .at("/rs_sync.Sync/UpdateFolderJobSchedule/:id", poem::put(update_folder_job_schedule))
+        .at("/rs_sync.Sync/RunFolderJob/:id", post(run_folder_job_now))
+        .at("/rs_sync.Sync/SyncFolderJobToGoogleCalendar/:id", post(sync_folder_job_to_google_calendar))
+        .at("/rs_sync.Sync/SyncJobToGoogleCalendar/:id", post(sync_job_to_google_calendar))
+        .at("/rs_sync.Sync/GetGoogleStatus", get(google_calendar_status))
+        .at("/rs_sync.Sync/GetGoogleLoginUrl", get(google_calendar_login))
+        .at("/rs_sync.Sync/GetGoogleCredentials", get(get_google_credentials))
+        .at("/rs_sync.Sync/UpdateGoogleCredentials", poem::put(update_google_credentials))
+        .at("/rs_sync.Sync/GetAdminEmail", get(get_admin_email))
+        .at("/rs_sync.Sync/UpdateAdminEmail", poem::put(update_admin_email))
+        .at("/rs_sync.Sync/GetBackupEmail", get(get_backup_email))
+        .at("/rs_sync.Sync/UpdateBackupEmail", poem::put(update_backup_email))
+        .at("/rs_sync.Sync/GetAdminPhone", get(get_admin_phone))
+        .at("/rs_sync.Sync/UpdateAdminPhone", poem::put(update_admin_phone))
+        .at("/rs_sync.Sync/SetupTotp", post(totp_setup))
+        .at("/rs_sync.Sync/EnableTotp", post(totp_enable))
+        .at("/rs_sync.Sync/DisableTotp", post(totp_disable))
+        .at("/rs_sync.Sync/GetTotpStatus", get(totp_status))
+        .at("/rs_sync.Sync/GetInstallerSyncStatus", get(installer_sync_status))
+        .at("/rs_sync.Sync/UpdateInstallerSyncConfig", poem::put(update_installer_sync_config))
+        .at("/rs_sync.Sync/RunInstallerSync", post(run_installer_sync_now))
+        .at("/rs_sync.Sync/SetLoginMode", poem::put(set_login_mode))
         .with(RequireAuth { auth_state: auth_state.clone() });
 
     let api = Route::new()
-        .at("/rs_sync.v1.Sync/RequestOtp", post(request_otp))
-        .at("/rs_sync.v1.Sync/VerifyOtp", post(verify_otp))
-        .at("/rs_sync.v1.Sync/Logout", post(logout))
+        .at("/rs_sync.Sync/RequestOtp", post(request_otp))
+        .at("/rs_sync.Sync/VerifyOtp", post(verify_otp))
+        .at("/rs_sync.Sync/Logout", post(logout))
         // ユーザー指示「e-mail不明になっても2FAでもログイン可能にして」:
         // メールOTPを経由しない代替ログイン経路のため未認証のまま公開する。
-        .at("/rs_sync.v1.Sync/TotpLogin", post(totp_login))
-        .at("/rs_sync.v1.Sync/GetLoginMode", get(get_login_mode))
-        .at("/rs_sync.v1.Sync/QrLoginStart", post(qr_login_start))
-        .at("/rs_sync.v1.Sync/QrLoginConfirm", post(qr_login_confirm))
-        .at("/rs_sync.v1.Sync/QrLoginStatus", post(qr_login_status))
-        .at("/rs_sync.v1.Sync/QrLoginWhoami", post(qr_login_whoami))
-        .at("/rs_sync.v1.Sync/QrLoginFinish", post(qr_login_finish))
+        .at("/rs_sync.Sync/TotpLogin", post(totp_login))
+        .at("/rs_sync.Sync/GetLoginMode", get(get_login_mode))
+        .at("/rs_sync.Sync/QrLoginStart", post(qr_login_start))
+        .at("/rs_sync.Sync/QrLoginConfirm", post(qr_login_confirm))
+        .at("/rs_sync.Sync/QrLoginStatus", post(qr_login_status))
+        .at("/rs_sync.Sync/QrLoginWhoami", post(qr_login_whoami))
+        .at("/rs_sync.Sync/QrLoginFinish", post(qr_login_finish))
         .nest("/", protected)
         .with(ReadOnlyGuard { read_only: auth_state.read_only })
         .data(state.clone())
         .data(auth_state.clone());
     let api = std::sync::Arc::new(poem::EndpointExt::boxed(api));
 
-    // 公開される入口はConnectの単純呼び出し(POST /rs_sync.v1.Sync/<Method>)のみ。
+    // 公開される入口はConnectの単純呼び出し(POST /rs_sync.Sync/<Method>)のみ。
     // 例外: GoogleのOAuthリダイレクト(規格により固定のGET)、ヘルスチェック、静的画面。
     Route::new()
         .at("/", get(index))
@@ -1448,8 +1448,6 @@ fn build_app(state: Arc<AppState>, auth_state: Arc<AuthState>) -> impl poem::End
         .at("/healthz", get(healthz))
         .at("/healthz/scheduler", get(healthz_scheduler))
         .at("/api/auth/google/callback", get(google_calendar_callback))
-        .at("/rs_sync.v1.Sync/:method", post(connect::ConnectEndpoint { inner: api.clone() }))
-        // Versionless: 版なしの別名(`/rs_sync.Sync/<Method>`)でも同じ呼び出しができる。`.v1` は呼び出し側を壊さないため当面残す。
         .at("/rs_sync.Sync/:method", post(connect::ConnectEndpoint { inner: api }))
         .data(state)
         .data(auth_state)
@@ -1542,15 +1540,15 @@ mod tests {
         (state, auth_state)
     }
 
-    /// Versionless: 版なしの名前(`/rs_sync.Sync/...`)でも版つきと同じ結果になる。
+    /// 版つき(`.v1`)の名前は廃止済みで404になり、版なしの名前だけが通る。
     #[tokio::test]
-    async fn versionless_alias_behaves_like_v1() {
+    async fn v1_names_are_gone_versionless_works() {
         let tmp = tempfile::tempdir().unwrap();
         let (state, auth_state) = make_state(&tmp, true);
         let client = TestClient::new(build_app(state, auth_state));
         let a = client.post("/rs_sync.v1.Sync/ListAccounts").send().await;
         let b = client.post("/rs_sync.Sync/ListAccounts").send().await;
-        a.assert_status(StatusCode::UNAUTHORIZED);
+        a.assert_status(StatusCode::NOT_FOUND);
         b.assert_status(StatusCode::UNAUTHORIZED);
         let c = client.post("/rs_sync.Sync/GetLoginMode").body_json(&serde_json::json!({})).send().await;
         c.assert_status_is_ok();
@@ -1565,10 +1563,10 @@ mod tests {
         let app = build_app(state, auth_state);
         let client = TestClient::new(app);
 
-        let resp = client.post("/rs_sync.v1.Sync/ListAccounts").send().await;
+        let resp = client.post("/rs_sync.Sync/ListAccounts").send().await;
         resp.assert_status(StatusCode::UNAUTHORIZED);
 
-        let resp = client.post("/rs_sync.v1.Sync/CreateAccount").body_json(&serde_json::json!({
+        let resp = client.post("/rs_sync.Sync/CreateAccount").body_json(&serde_json::json!({
             "id": "", "name": "x", "provider": "GitHub", "api_base": "https://api.github.com",
             "git_base": "https://github.com", "owner": "me", "token": "secret-token"
         })).send().await;
@@ -1584,7 +1582,7 @@ mod tests {
         let client = TestClient::new(app);
 
         let resp = client
-            .post("/rs_sync.v1.Sync/CreateAccount")
+            .post("/rs_sync.Sync/CreateAccount")
             .header("Authorization", format!("Bearer {token}"))
             .body_json(&serde_json::json!({
                 "id": "", "name": "x", "provider": "GitHub", "api_base": "https://api.github.com",
@@ -1596,7 +1594,7 @@ mod tests {
         let body_text = resp.0.into_body().into_string().await.unwrap();
         assert!(!body_text.contains("super-secret-pat"), "raw token leaked in create response: {body_text}");
 
-        let resp = client.post("/rs_sync.v1.Sync/ListAccounts").header("Authorization", format!("Bearer {token}")).send().await;
+        let resp = client.post("/rs_sync.Sync/ListAccounts").header("Authorization", format!("Bearer {token}")).send().await;
         resp.assert_status_is_ok();
         let body_text = resp.0.into_body().into_string().await.unwrap();
         assert!(!body_text.contains("super-secret-pat"), "raw token leaked in list response: {body_text}");
@@ -1614,7 +1612,7 @@ mod tests {
         let client = TestClient::new(app);
 
         let create_resp = client
-            .post("/rs_sync.v1.Sync/CreateAccount")
+            .post("/rs_sync.Sync/CreateAccount")
             .header("Authorization", format!("Bearer {token}"))
             .body_json(&serde_json::json!({
                 "id": "", "name": "master", "provider": "GitHub", "api_base": "https://api.github.com",
@@ -1630,7 +1628,7 @@ mod tests {
         assert_eq!(created["token_set"], serde_json::json!(false));
 
         let update_resp = client
-            .post("/rs_sync.v1.Sync/UpdateAccountToken")
+            .post("/rs_sync.Sync/UpdateAccountToken")
             .header("Authorization", format!("Bearer {token}"))
             .body_json(&serde_json::json!({"id": id,"token": "ghp_newtoken"}))
             .send()
@@ -1639,13 +1637,13 @@ mod tests {
         let updated_body = update_resp.0.into_body().into_string().await.unwrap();
         assert!(!updated_body.contains("ghp_newtoken"), "raw token leaked in update response: {updated_body}");
 
-        let list_resp = client.post("/rs_sync.v1.Sync/ListAccounts").header("Authorization", format!("Bearer {token}")).send().await;
+        let list_resp = client.post("/rs_sync.Sync/ListAccounts").header("Authorization", format!("Bearer {token}")).send().await;
         let list: serde_json::Value = list_resp.0.into_body().into_json().await.unwrap();
         assert_eq!(list[0]["token_set"], serde_json::json!(true));
 
         // 存在しないIDへの更新は404。
         let missing_resp = client
-            .post("/rs_sync.v1.Sync/UpdateAccountToken")
+            .post("/rs_sync.Sync/UpdateAccountToken")
             .header("Authorization", format!("Bearer {token}"))
             .body_json(&serde_json::json!({"id": "does-not-exist","token": "x"}))
             .send()
@@ -1668,7 +1666,7 @@ mod tests {
         let client = TestClient::new(app);
 
         let create_resp = client
-            .post("/rs_sync.v1.Sync/CreateAccount")
+            .post("/rs_sync.Sync/CreateAccount")
             .header("Authorization", format!("Bearer {token}"))
             .body_json(&serde_json::json!({
                 "id": "", "name": "master", "provider": "GitHub", "api_base": "https://api.github.com",
@@ -1687,7 +1685,7 @@ mod tests {
         }
 
         let update_resp = client
-            .post("/rs_sync.v1.Sync/UpdateAccountToken")
+            .post("/rs_sync.Sync/UpdateAccountToken")
             .header("Authorization", format!("Bearer {token}"))
             .body_json(&serde_json::json!({"id": id,"token": "\tghp_anothertoken  "}))
             .send()
@@ -1713,7 +1711,7 @@ mod tests {
         let client = TestClient::new(app);
 
         let create_resp = client
-            .post("/rs_sync.v1.Sync/CreateFolderEndpoint")
+            .post("/rs_sync.Sync/CreateFolderEndpoint")
             .header("Authorization", format!("Bearer {token}"))
             .body_json(&serde_json::json!({
                 "id":"", "name":"nas", "kind":"Sftp", "path":"/backups",
@@ -1726,14 +1724,14 @@ mod tests {
         let created_body = create_resp.0.into_body().into_string().await.unwrap();
         assert!(!created_body.contains("super-secret-password"), "raw password leaked: {created_body}");
 
-        let list_resp = client.post("/rs_sync.v1.Sync/ListFolderEndpoints").header("Authorization", format!("Bearer {token}")).send().await;
+        let list_resp = client.post("/rs_sync.Sync/ListFolderEndpoints").header("Authorization", format!("Bearer {token}")).send().await;
         list_resp.assert_status_is_ok();
         let list_body = list_resp.0.into_body().into_string().await.unwrap();
         assert!(!list_body.contains("super-secret-password"), "raw password leaked in list: {list_body}");
         assert!(list_body.contains("\"credentials_set\":true"));
 
         // 未ログインでは401。
-        let unauth = client.post("/rs_sync.v1.Sync/ListFolderEndpoints").send().await;
+        let unauth = client.post("/rs_sync.Sync/ListFolderEndpoints").send().await;
         unauth.assert_status(StatusCode::UNAUTHORIZED);
     }
 
@@ -1764,7 +1762,7 @@ mod tests {
         let app = build_app(state, auth_state);
         let client = TestClient::new(app);
 
-        let resp = client.post("/rs_sync.v1.Sync/ListAccounts").send().await;
+        let resp = client.post("/rs_sync.Sync/ListAccounts").send().await;
         resp.assert_status_is_ok();
     }
 
@@ -1779,14 +1777,14 @@ mod tests {
         let client = TestClient::new(app);
 
         let resp = client
-            .post("/rs_sync.v1.Sync/VerifyOtp")
+            .post("/rs_sync.Sync/VerifyOtp")
             .body_json(&serde_json::json!({"email": "admin@example.com", "code": code}))
             .send()
             .await;
         resp.assert_status_is_ok();
 
         let resp = client
-            .post("/rs_sync.v1.Sync/VerifyOtp")
+            .post("/rs_sync.Sync/VerifyOtp")
             .body_json(&serde_json::json!({"email": "admin@example.com", "code": "000000"}))
             .send()
             .await;
@@ -1806,7 +1804,7 @@ mod tests {
         let auth = format!("Bearer {token}");
 
         let src_resp = client
-            .post("/rs_sync.v1.Sync/CreateFolderEndpoint")
+            .post("/rs_sync.Sync/CreateFolderEndpoint")
             .header("Authorization", &auth)
             .body_json(&serde_json::json!({
                 "id": "", "name": "src", "kind": "Local", "path": "/tmp/a",
@@ -1816,7 +1814,7 @@ mod tests {
             .await;
         let src: serde_json::Value = src_resp.0.into_body().into_json().await.unwrap();
         let dst_resp = client
-            .post("/rs_sync.v1.Sync/CreateFolderEndpoint")
+            .post("/rs_sync.Sync/CreateFolderEndpoint")
             .header("Authorization", &auth)
             .body_json(&serde_json::json!({
                 "id": "", "name": "dst", "kind": "Local", "path": "/tmp/b",
@@ -1827,7 +1825,7 @@ mod tests {
         let dst: serde_json::Value = dst_resp.0.into_body().into_json().await.unwrap();
 
         let job_resp = client
-            .post("/rs_sync.v1.Sync/CreateFolderJob")
+            .post("/rs_sync.Sync/CreateFolderJob")
             .header("Authorization", &auth)
             .body_json(&serde_json::json!({
                 "id": "", "name": "j", "source_endpoint_id": src["id"], "dest_endpoint_id": dst["id"],
@@ -1840,7 +1838,7 @@ mod tests {
         assert_eq!(job["schedule"]["every_hours"], serde_json::json!(1));
 
         let update_resp = client
-            .post("/rs_sync.v1.Sync/UpdateFolderJobSchedule")
+            .post("/rs_sync.Sync/UpdateFolderJobSchedule")
             .header("Authorization", &auth)
             .body_json(&serde_json::json!({"id": job_id,
                 "schedule": {"every_hours": null, "days_of_week": [], "hour": null, "minute": null, "realtime_poll_minutes": 15}
@@ -1849,13 +1847,13 @@ mod tests {
             .await;
         update_resp.assert_status_is_ok();
 
-        let list_resp = client.post("/rs_sync.v1.Sync/ListFolderJobs").header("Authorization", &auth).send().await;
+        let list_resp = client.post("/rs_sync.Sync/ListFolderJobs").header("Authorization", &auth).send().await;
         let list: serde_json::Value = list_resp.0.into_body().into_json().await.unwrap();
         assert_eq!(list[0]["schedule"]["every_hours"], serde_json::json!(null));
         assert_eq!(list[0]["schedule"]["realtime_poll_minutes"], serde_json::json!(15));
 
         let missing_resp = client
-            .post("/rs_sync.v1.Sync/UpdateFolderJobSchedule")
+            .post("/rs_sync.Sync/UpdateFolderJobSchedule")
             .header("Authorization", &auth)
             .body_json(&serde_json::json!({"id": "does-not-exist",
                 "schedule": {"every_hours": 1, "days_of_week": [], "hour": null, "minute": null, "realtime_poll_minutes": null}
@@ -1880,7 +1878,7 @@ mod tests {
         let auth = format!("Bearer {token}");
 
         let resp = client
-            .post("/rs_sync.v1.Sync/UpdateBackupEmail")
+            .post("/rs_sync.Sync/UpdateBackupEmail")
             .header("Authorization", &auth)
             .body_json(&serde_json::json!({"backup_email": "backup@example.com"}))
             .send()
@@ -1890,7 +1888,7 @@ mod tests {
         // 予備メールアドレスでもOTP要求が(SMTP未設定のため503にはなるが
         // "登録されていない連絡先"の403にはならない、という形で)通る。
         let resp = client
-            .post("/rs_sync.v1.Sync/RequestOtp")
+            .post("/rs_sync.Sync/RequestOtp")
             .body_json(&serde_json::json!({"email": "backup@example.com"}))
             .send()
             .await;
@@ -1898,7 +1896,7 @@ mod tests {
 
         // 未登録のメールアドレスは引き続き拒否される。
         let resp = client
-            .post("/rs_sync.v1.Sync/RequestOtp")
+            .post("/rs_sync.Sync/RequestOtp")
             .body_json(&serde_json::json!({"email": "someone-else@example.com"}))
             .send()
             .await;
@@ -1919,13 +1917,13 @@ mod tests {
 
         // 有効化前はtotp-loginで拒否される。
         let resp = client
-            .post("/rs_sync.v1.Sync/TotpLogin")
+            .post("/rs_sync.Sync/TotpLogin")
             .body_json(&serde_json::json!({"code": "000000"}))
             .send()
             .await;
         resp.assert_status(StatusCode::FORBIDDEN);
 
-        let setup_resp = client.post("/rs_sync.v1.Sync/SetupTotp").header("Authorization", &auth).send().await;
+        let setup_resp = client.post("/rs_sync.Sync/SetupTotp").header("Authorization", &auth).send().await;
         setup_resp.assert_status_is_ok();
         let setup_body: serde_json::Value = setup_resp.0.into_body().into_json().await.unwrap();
         let secret = setup_body["secret"].as_str().unwrap().to_string();
@@ -1934,14 +1932,14 @@ mod tests {
         let code = rs_sync::totp::code_at(&secret, now).unwrap();
 
         let enable_resp = client
-            .post("/rs_sync.v1.Sync/EnableTotp")
+            .post("/rs_sync.Sync/EnableTotp")
             .header("Authorization", &auth)
             .body_json(&serde_json::json!({"code": code}))
             .send()
             .await;
         enable_resp.assert_status_is_ok();
 
-        let status_resp = client.post("/rs_sync.v1.Sync/GetTotpStatus").header("Authorization", &auth).send().await;
+        let status_resp = client.post("/rs_sync.Sync/GetTotpStatus").header("Authorization", &auth).send().await;
         let status_body: serde_json::Value = status_resp.0.into_body().into_json().await.unwrap();
         assert_eq!(status_body["enabled"], serde_json::json!(true));
 
@@ -1949,7 +1947,7 @@ mod tests {
         let now2 = chrono::Utc::now().timestamp();
         let code2 = rs_sync::totp::code_at(&secret, now2).unwrap();
         let login_resp = client
-            .post("/rs_sync.v1.Sync/TotpLogin")
+            .post("/rs_sync.Sync/TotpLogin")
             .body_json(&serde_json::json!({"code": code2}))
             .send()
             .await;
@@ -1958,9 +1956,9 @@ mod tests {
         assert!(login_body["token"].as_str().is_some());
 
         // 無効化後は拒否される。
-        client.post("/rs_sync.v1.Sync/DisableTotp").header("Authorization", &auth).send().await;
+        client.post("/rs_sync.Sync/DisableTotp").header("Authorization", &auth).send().await;
         let login_resp2 = client
-            .post("/rs_sync.v1.Sync/TotpLogin")
+            .post("/rs_sync.Sync/TotpLogin")
             .body_json(&serde_json::json!({"code": code2}))
             .send()
             .await;
@@ -1975,29 +1973,29 @@ mod tests {
         let client = TestClient::new(build_app(state, auth_state));
         let auth = format!("Bearer {token}");
         // 存在しないジョブへの操作は従来どおり200+本文のフラグ(画面がそれを読む)。idは本文から経路へ渡る。
-        let resp = client.post("/rs_sync.v1.Sync/RunJob").header("Authorization", &auth).body_json(&serde_json::json!({"id": "nope"})).send().await;
+        let resp = client.post("/rs_sync.Sync/RunJob").header("Authorization", &auth).body_json(&serde_json::json!({"id": "nope"})).send().await;
         resp.assert_status_is_ok();
         let v: serde_json::Value = resp.0.into_body().into_json().await.unwrap();
         assert_eq!(v["success"], false, "{v}");
-        let resp = client.post("/rs_sync.v1.Sync/ResolveConflict").header("Authorization", &auth).body_json(&serde_json::json!({"id": "nope", "repo": "r/x y"})).send().await;
+        let resp = client.post("/rs_sync.Sync/ResolveConflict").header("Authorization", &auth).body_json(&serde_json::json!({"id": "nope", "repo": "r/x y"})).send().await;
         resp.assert_status_is_ok();
         let v: serde_json::Value = resp.0.into_body().into_json().await.unwrap();
         assert_eq!(v["ok"], false, "{v}");
         // 存在しないIDの更新は404で`{"code","message"}`
-        let resp = client.post("/rs_sync.v1.Sync/UpdateAccountToken").header("Authorization", &auth).body_json(&serde_json::json!({"id": "nope", "token": "x"})).send().await;
+        let resp = client.post("/rs_sync.Sync/UpdateAccountToken").header("Authorization", &auth).body_json(&serde_json::json!({"id": "nope", "token": "x"})).send().await;
         resp.assert_status(StatusCode::NOT_FOUND);
         let v: serde_json::Value = resp.0.into_body().into_json().await.unwrap();
         assert_eq!(v["code"], "not_found", "{v}");
         assert!(v["message"].is_string());
         // `id`欠落は400、`repo`欠落も400
-        let resp = client.post("/rs_sync.v1.Sync/RunJob").header("Authorization", &auth).body_json(&serde_json::json!({})).send().await;
+        let resp = client.post("/rs_sync.Sync/RunJob").header("Authorization", &auth).body_json(&serde_json::json!({})).send().await;
         resp.assert_status(StatusCode::BAD_REQUEST);
-        let resp = client.post("/rs_sync.v1.Sync/ResolveConflict").header("Authorization", &auth).body_json(&serde_json::json!({"id": "x"})).send().await;
+        let resp = client.post("/rs_sync.Sync/ResolveConflict").header("Authorization", &auth).body_json(&serde_json::json!({"id": "x"})).send().await;
         resp.assert_status(StatusCode::BAD_REQUEST);
         // 旧RESTパス・未知メソッド・GETは使えない
         client.get("/api/jobs").header("Authorization", &auth).send().await.assert_status(StatusCode::NOT_FOUND);
-        client.post("/rs_sync.v1.Sync/Nope").header("Authorization", &auth).body_json(&serde_json::json!({})).send().await.assert_status(StatusCode::NOT_FOUND);
-        client.get("/rs_sync.v1.Sync/ListJobs").header("Authorization", &auth).send().await.assert_status(StatusCode::METHOD_NOT_ALLOWED);
+        client.post("/rs_sync.Sync/Nope").header("Authorization", &auth).body_json(&serde_json::json!({})).send().await.assert_status(StatusCode::NOT_FOUND);
+        client.get("/rs_sync.Sync/ListJobs").header("Authorization", &auth).send().await.assert_status(StatusCode::METHOD_NOT_ALLOWED);
     }
 
     async fn json_of(resp: poem::test::TestResponse) -> serde_json::Value {
@@ -2014,29 +2012,29 @@ mod tests {
         let client = TestClient::new(build_app(state, auth_state));
         let auth = format!("Bearer {token}");
 
-        let body = json_of(client.post("/rs_sync.v1.Sync/GetLoginMode").send().await).await;
+        let body = json_of(client.post("/rs_sync.Sync/GetLoginMode").send().await).await;
         assert_eq!(body["login_mode"], "otp");
         client
-            .post("/rs_sync.v1.Sync/SetLoginMode")
+            .post("/rs_sync.Sync/SetLoginMode")
             .body_json(&serde_json::json!({"login_mode": "otp_qr"}))
             .send()
             .await
             .assert_status(StatusCode::UNAUTHORIZED);
         client
-            .post("/rs_sync.v1.Sync/SetLoginMode")
+            .post("/rs_sync.Sync/SetLoginMode")
             .header("Authorization", &auth)
             .body_json(&serde_json::json!({"login_mode": "none"}))
             .send()
             .await
             .assert_status(StatusCode::BAD_REQUEST);
         client
-            .post("/rs_sync.v1.Sync/SetLoginMode")
+            .post("/rs_sync.Sync/SetLoginMode")
             .header("Authorization", &auth)
             .body_json(&serde_json::json!({"login_mode": "otp_qr"}))
             .send()
             .await
             .assert_status_is_ok();
-        let body = json_of(client.post("/rs_sync.v1.Sync/GetLoginMode").send().await).await;
+        let body = json_of(client.post("/rs_sync.Sync/GetLoginMode").send().await).await;
         assert_eq!(body["login_mode"], "otp_qr");
         assert_eq!(state_for_check.store.lock().unwrap().login_mode.as_deref(), Some("otp_qr"));
         client.get("/qr-confirm.html").send().await.assert_status_is_ok();
@@ -2053,7 +2051,7 @@ mod tests {
 
         let body = json_of(
             client
-                .post("/rs_sync.v1.Sync/VerifyOtp")
+                .post("/rs_sync.Sync/VerifyOtp")
                 .body_json(&serde_json::json!({"email": "admin@example.com", "code": code}))
                 .send()
                 .await,
@@ -2065,27 +2063,27 @@ mod tests {
         assert!(body["qr_svg"].as_str().unwrap().contains("<svg"));
         assert!(body["confirm_url"].as_str().unwrap().ends_with(&format!("/qr-confirm.html?id={id}")));
 
-        let who = json_of(client.post("/rs_sync.v1.Sync/QrLoginWhoami").body_json(&serde_json::json!({"id": id})).send().await).await;
+        let who = json_of(client.post("/rs_sync.Sync/QrLoginWhoami").body_json(&serde_json::json!({"id": id})).send().await).await;
         assert_eq!(who["masked_email"], "ad***@example.com");
         // 確認前のfinishは拒否される。
-        client.post("/rs_sync.v1.Sync/QrLoginFinish").body_json(&serde_json::json!({"id": id})).send().await.assert_status(StatusCode::BAD_REQUEST);
-        let st = json_of(client.post("/rs_sync.v1.Sync/QrLoginStatus").body_json(&serde_json::json!({"id": id})).send().await).await;
+        client.post("/rs_sync.Sync/QrLoginFinish").body_json(&serde_json::json!({"id": id})).send().await.assert_status(StatusCode::BAD_REQUEST);
+        let st = json_of(client.post("/rs_sync.Sync/QrLoginStatus").body_json(&serde_json::json!({"id": id})).send().await).await;
         assert_eq!(st["confirmed"], false);
 
-        client.post("/rs_sync.v1.Sync/QrLoginConfirm").body_json(&serde_json::json!({"id": id})).send().await.assert_status_is_ok();
-        let st = json_of(client.post("/rs_sync.v1.Sync/QrLoginStatus").body_json(&serde_json::json!({"id": id})).send().await).await;
+        client.post("/rs_sync.Sync/QrLoginConfirm").body_json(&serde_json::json!({"id": id})).send().await.assert_status_is_ok();
+        let st = json_of(client.post("/rs_sync.Sync/QrLoginStatus").body_json(&serde_json::json!({"id": id})).send().await).await;
         assert_eq!(st["confirmed"], true);
 
-        let fin = json_of(client.post("/rs_sync.v1.Sync/QrLoginFinish").body_json(&serde_json::json!({"id": id})).send().await).await;
+        let fin = json_of(client.post("/rs_sync.Sync/QrLoginFinish").body_json(&serde_json::json!({"id": id})).send().await).await;
         let token = fin["token"].as_str().unwrap().to_string();
         client
-            .post("/rs_sync.v1.Sync/ListAccounts")
+            .post("/rs_sync.Sync/ListAccounts")
             .header("Authorization", format!("Bearer {token}"))
             .send()
             .await
             .assert_status_is_ok();
         // 1回限り。
-        client.post("/rs_sync.v1.Sync/QrLoginFinish").body_json(&serde_json::json!({"id": id})).send().await.assert_status(StatusCode::BAD_REQUEST);
+        client.post("/rs_sync.Sync/QrLoginFinish").body_json(&serde_json::json!({"id": id})).send().await.assert_status(StatusCode::BAD_REQUEST);
     }
 
     /// qr: 認証アプリ(TOTP)が有効なときだけ選べ、メールOTPは使えず、登録メールを名乗ってQRで入る。
@@ -2100,7 +2098,7 @@ mod tests {
 
         // TOTP無効のうちは選べない(締め出し防止)。
         client
-            .post("/rs_sync.v1.Sync/SetLoginMode")
+            .post("/rs_sync.Sync/SetLoginMode")
             .header("Authorization", &auth)
             .body_json(&serde_json::json!({"login_mode": "qr"}))
             .send()
@@ -2110,7 +2108,7 @@ mod tests {
         *auth_for_checks.totp_secret.lock().unwrap() = Some(rs_sync::totp::generate_secret());
         *auth_for_checks.totp_enabled.lock().unwrap() = true;
         client
-            .post("/rs_sync.v1.Sync/SetLoginMode")
+            .post("/rs_sync.Sync/SetLoginMode")
             .header("Authorization", &auth)
             .body_json(&serde_json::json!({"login_mode": "qr"}))
             .send()
@@ -2119,14 +2117,14 @@ mod tests {
 
         // メールOTPは使えない。
         client
-            .post("/rs_sync.v1.Sync/VerifyOtp")
+            .post("/rs_sync.Sync/VerifyOtp")
             .body_json(&serde_json::json!({"email": "admin@example.com", "code": "000000"}))
             .send()
             .await
             .assert_status(StatusCode::FORBIDDEN);
         // 他人のメールではQRを出さない。
         client
-            .post("/rs_sync.v1.Sync/QrLoginStart")
+            .post("/rs_sync.Sync/QrLoginStart")
             .body_json(&serde_json::json!({"account_email": "someone@example.com"}))
             .send()
             .await
@@ -2134,15 +2132,15 @@ mod tests {
 
         let start = json_of(
             client
-                .post("/rs_sync.v1.Sync/QrLoginStart")
+                .post("/rs_sync.Sync/QrLoginStart")
                 .body_json(&serde_json::json!({"account_email": "admin@example.com"}))
                 .send()
                 .await,
         )
         .await;
         let id = start["qr_login_id"].as_str().unwrap().to_string();
-        client.post("/rs_sync.v1.Sync/QrLoginConfirm").body_json(&serde_json::json!({"id": id})).send().await.assert_status_is_ok();
-        let fin = json_of(client.post("/rs_sync.v1.Sync/QrLoginFinish").body_json(&serde_json::json!({"id": id})).send().await).await;
+        client.post("/rs_sync.Sync/QrLoginConfirm").body_json(&serde_json::json!({"id": id})).send().await.assert_status_is_ok();
+        let fin = json_of(client.post("/rs_sync.Sync/QrLoginFinish").body_json(&serde_json::json!({"id": id})).send().await).await;
         assert!(fin["token"].as_str().is_some());
     }
 
@@ -2154,14 +2152,14 @@ mod tests {
         let RequestOtpOutcome::Issued(code) = auth_state.auth.request_otp("admin@example.com");
         let client = TestClient::new(build_app(state, auth_state));
         client
-            .post("/rs_sync.v1.Sync/QrLoginStart")
+            .post("/rs_sync.Sync/QrLoginStart")
             .body_json(&serde_json::json!({"account_email": "admin@example.com"}))
             .send()
             .await
             .assert_status(StatusCode::FORBIDDEN);
         let body = json_of(
             client
-                .post("/rs_sync.v1.Sync/VerifyOtp")
+                .post("/rs_sync.Sync/VerifyOtp")
                 .body_json(&serde_json::json!({"email": "admin@example.com", "code": code}))
                 .send()
                 .await,

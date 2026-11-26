@@ -658,8 +658,8 @@ async function probeAuthRequirement(){
 }
 
 // Connect の単純呼び出し(2026-11-04、REST全廃): 画面内の呼び出し表記
-// (動詞+旧パス)を `POST rs_sync.v1.Sync/<Method>`(JSON本文、idは本文)へ変換する。
-const CONNECT_SERVICE = "rs_sync.v1.Sync";
+// (動詞+旧パス)を `POST rs_sync.Sync/<Method>`(JSON本文、idは本文)へ変換する。
+const CONNECT_SERVICE = "rs_sync.Sync";
 const CONNECT_TABLE = [
   ["GET","accounts","ListAccounts"],["POST","accounts","CreateAccount"],
   ["DELETE","accounts/:id","DeleteAccount"],["PUT","accounts/:id","UpdateAccountToken"],
