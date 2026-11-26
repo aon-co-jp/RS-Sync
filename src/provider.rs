@@ -259,7 +259,7 @@ impl Provider for GitHubProvider {
 
 // ---------------- open-gitea (self-hosted) ----------------
 // open-gitea (aon-co-jp/open-gitea) exposes git smart-HTTP directly plus a small JSON API
-// (Connect: `POST /open_gitea.v1.Gitea/ListRepos` and `/CreateRepo`; REST was abolished 2026-11-07). Repo creation and git push both
+// (Connect: `POST /open_gitea.Gitea/ListRepos` and `/CreateRepo`; REST was abolished 2026-11-07). Repo creation and git push both
 // require auth: open-gitea accepts `Authorization: Bearer <session-token>` on the
 // JSON API, and `email:session-token` Basic auth embedded in the git remote URL
 // (see open-gitea's CLAUDE.md "git CLI向け認証方式"). `account.owner` holds the
@@ -271,7 +271,7 @@ pub struct OpenGiteaProvider;
 impl Provider for OpenGiteaProvider {
     fn list_repos(&self, account: &Account) -> Result<Vec<String>> {
         let client = http_client();
-        let url = format!("{}/open_gitea.v1.Gitea/ListRepos", account.api_base.trim_end_matches('/'));
+        let url = format!("{}/open_gitea.Gitea/ListRepos", account.api_base.trim_end_matches('/'));
         // 2026-08-01追記(実機検証で確認したGitHubプロバイダと同じ罠を
         // 未然に防ぐ): 空トークンの場合は`Authorization`ヘッダー自体を
         // 送らない。open-gitea自身は現状空Bearerでも200を返す実装だが
@@ -298,7 +298,7 @@ impl Provider for OpenGiteaProvider {
 
     fn ensure_repo(&self, account: &Account, repo: &str) -> Result<()> {
         let client = http_client();
-        let url = format!("{}/open_gitea.v1.Gitea/CreateRepo", account.api_base.trim_end_matches('/'));
+        let url = format!("{}/open_gitea.Gitea/CreateRepo", account.api_base.trim_end_matches('/'));
         let req = maybe_auth_header(client.post(&url).json(&serde_json::json!({ "name": repo })), "Authorization", &account.token, |t| format!("Bearer {t}"));
         let resp = req.send()?;
         // open-gitea returns success or "already exists" style responses; treat any
@@ -757,7 +757,7 @@ mod tests {
         let repos = OpenGiteaProvider.list_repos(&acc).unwrap();
         assert_eq!(repos, vec!["repo-e".to_string()]);
         let req = server.last_request();
-        assert!(req.starts_with("POST /open_gitea.v1.Gitea/ListRepos"), "req={req}");
+        assert!(req.starts_with("POST /open_gitea.Gitea/ListRepos"), "req={req}");
         assert!(req.to_lowercase().contains("authorization: bearer session-token"), "req={req}");
     }
 
