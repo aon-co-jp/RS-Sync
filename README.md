@@ -419,7 +419,7 @@ Gitbucket)間でリポジトリを同期・バックアップするWebアプリ�
 - **Если есть сомнения — выбирайте Connect.**
 
 ## API(2026-11-05〜): REST全廃・Connect
-公開APIは `POST /rs_sync.v1.Sync/<Method>`(`content-type: application/json`、`id`/`repo`は本文、エラーは`{"code","message"}`)のみ。例外(規格どおり): `/healthz`・`/healthz/scheduler`・`/`・`/api/auth/google/callback`(GoogleのOAuth)。旧`/api/*`のRESTは削除済み。メソッド一覧は`src/connect.rs`。
+公開APIは `POST /rs_sync.Sync/<Method>`(`content-type: application/json`、`id`/`repo`は本文、エラーは`{"code","message"}`)のみ。例外(規格どおり): `/healthz`・`/healthz/scheduler`・`/`・`/api/auth/google/callback`(GoogleのOAuth)。旧`/api/*`のRESTは削除済み。メソッド一覧は`src/connect.rs`。
 
 ## 追記(2026-11-16) スケジュール拡充・Googleカレンダー連携・アカウント設定・認証アプリログイン
 
@@ -491,3 +491,18 @@ Gitbucket)間でリポジトリを同期・バックアップするWebアプリ�
   - Demo: `GetLoginMode` 200; `ListAccounts` 200.
   - Old `/api/accounts` 404; public URL 200; `/healthz` 200; error log 0; no missing libraries.
 - The production deploy is done. Still open: a QR login with a real phone camera and an `otp_qr` run with real mail (both need a person).
+
+
+## 2026-11-26 `.v1` 即削除・版なし名へ統一 / `.v1` removed immediately, versionless names only
+
+### 日本語
+- ユーザー指示(2026-11-26)により、自前APIの版つき名(`rs_sync.v1.…`)は**猶予なしで削除**し、版なし名(`rs_sync.Sync/<Method>`)だけにした。旧名は404を返す(試験 `v1_names_are_gone_versionless_works` で確認)。画面・試験・文書・メール文面の呼び出しも版なし名へ書き換え済み。
+- 第三者の規格名(`grpc.health.v1` 等)は対象外で触っていない。
+- 本番(VPS)への反映・実測は、このコミットの後の記録(下の「本番反映」行)を参照。反映前は旧名が本番で動いている。
+- **再開用メッセージ(別アカウントでそのまま貼り付け)**: 前の続きです。`RS-Sync` の README/CLAUDE/PORTING の「2026-11-26 `.v1` 即削除」を読み、(1)`vps-build.sh`(Ubuntu-24.04)でビルドし `check-glibc.sh` を通す、(2)VPSの該当サービスを `*.before-v1del-20261126` にバックアップして入れ替える、(3)新名200/401・旧名404・`/healthz` 200・エラーログ0を実測、(4)結果をこの節に追記してpush。VPSのcloneは `git pull` せず fetch+reset。関連リポジトリ: RS-EC・RS-Blog・RS-Sync(RS-Opsは必要なら)・`runo`。秘密は出さない、VPSでビルドしない、新しいRESTは作らない。
+
+### English
+- Per the user's instruction (2026-11-26), the versioned names of our own API (`rs_sync.v1.…`) were **deleted immediately with no grace period**; only the versionless names (`rs_sync.Sync/<Method>`) remain. Old names return 404 (test `v1_names_are_gone_versionless_works`). Callers in the UI, tests, docs and mail text were rewritten to the versionless names.
+- Third-party standard names (`grpc.health.v1` etc.) are out of scope and untouched.
+- For the production swap and measurements see the later "production" note below; before that, production still serves the old names.
+- **Resume message (paste as is on another account)**: Continuing from before. Read "2026-11-26 `.v1` removed immediately" in the README/CLAUDE/PORTING of `RS-Sync`, then (1) build with `vps-build.sh` (Ubuntu-24.04) and pass `check-glibc.sh`, (2) back up the VPS service as `*.before-v1del-20261126` and swap it, (3) measure new names 200/401, old names 404, `/healthz` 200, error log 0, (4) append the result to this section and push. Never `git pull` VPS clones (fetch+reset). Related repos: RS-EC, RS-Blog, RS-Sync (RS-Ops if needed), `runo`. Never print secrets, never build on the VPS, no new REST.

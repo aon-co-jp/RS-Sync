@@ -5,8 +5,8 @@ Japanese and English are always the newest. Other languages are not translated e
 
 ## CLAUDE.md
 
-- 日本語 / ja: 2026-11-20 (latest)
-- English / en: 2026-11-20
+- 日本語 / ja: 2026-11-26 (latest)
+- English / en: 2026-11-26
 - 简体中文 / zh-Hans: not yet / まだ
 - 繁體中文 / zh-Hant: not yet / まだ
 - 한국어 / ko: not yet / まだ
@@ -20,8 +20,8 @@ Japanese and English are always the newest. Other languages are not translated e
 
 ## POLICY.md
 
-- 日本語 / ja: 2026-11-20 (latest)
-- English / en: 2026-11-20
+- 日本語 / ja: 2026-11-26 (latest)
+- English / en: 2026-11-26
 - 简体中文 / zh-Hans: not yet / まだ
 - 繁體中文 / zh-Hant: not yet / まだ
 - 한국어 / ko: not yet / まだ
@@ -35,8 +35,8 @@ Japanese and English are always the newest. Other languages are not translated e
 
 ## PORTING.md
 
-- 日本語 / ja: 2026-11-20 (latest)
-- English / en: 2026-11-20
+- 日本語 / ja: 2026-11-26 (latest)
+- English / en: 2026-11-26
 - 简体中文 / zh-Hans: not yet / まだ
 - 繁體中文 / zh-Hant: not yet / まだ
 - 한국어 / ko: not yet / まだ
@@ -50,8 +50,8 @@ Japanese and English are always the newest. Other languages are not translated e
 
 ## README.md
 
-- 日本語 / ja: 2026-11-20 (latest)
-- English / en: 2026-11-20
+- 日本語 / ja: 2026-11-26 (latest)
+- English / en: 2026-11-26
 - 简体中文 / zh-Hans: not yet / まだ
 - 繁體中文 / zh-Hant: not yet / まだ
 - 한국어 / ko: not yet / まだ
